@@ -30,8 +30,8 @@
 <link rel="preload" href="/fonts/inter-latin.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="/fonts/bricolage-grotesque-latin.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="/fonts/fonts.css">
-<link rel="stylesheet" href="/assets/styles.3c9215d829.css">
-<script type="module" src="/assets/main.bc9bc57593.js"></script>
+<link rel="stylesheet" href="/assets/styles.37a744cdcf.css">
+<script type="module" src="/assets/main.601c1aed1c.js"></script>
 </head>
 <body>
 <div class="app">
@@ -173,9 +173,19 @@
             <button id="viewDaily" aria-pressed="false">Daily</button>
           </div>
         </div>
-        <div class="seg period" role="group" aria-label="Leaderboard period" id="periodSeg">
-          <button id="tabAll" aria-pressed="true">All time</button>
-          <button id="tabWeek" aria-pressed="false">This week</button>
+        <div class="board-tools" id="boardTools">
+          <div class="seg period" role="group" aria-label="Leaderboard period" id="periodSeg">
+            <button id="tabAll" aria-pressed="true">All time</button>
+            <button id="tabWeek" aria-pressed="false">This week</button>
+          </div>
+          <label class="board-mode"><span class="sr-only">Game length</span>
+            <select id="boardMode">
+              <option value="15:0">15 rounds</option><option value="20:0">20 rounds</option>
+              <option value="30:0">30 rounds</option><option value="50:0">50 rounds</option>
+              <option value="15:1">15 · Hard</option><option value="20:1">20 · Hard</option>
+              <option value="30:1">30 · Hard</option><option value="50:1">50 · Hard</option>
+            </select>
+          </label>
         </div>
         <ol class="board" id="board"></ol>
         <div class="empty" id="boardEmpty">Loading scores…</div>
@@ -249,13 +259,13 @@
           <h2>You’re ready</h2>
           <p id="readyText">Each answer now has 3 seconds, and the question can switch at any time.</p>
           <div class="ready-btns">
-            <button class="ghost" id="practiceAgainBtn">Practice again</button>
+            <button class="ghost" id="practiceAgainBtn">Practise again</button>
             <button class="cta" id="readyPlayBtn">Play 20 rounds</button>
           </div>
         </div>
       </div>
 
-      <div class="overlay" id="countOverlay" hidden><div class="count" id="count">3</div></div>
+      <div class="overlay" id="countOverlay" hidden><div class="count" id="count">Ready</div><p class="count-note" id="countNote" hidden></p></div>
       <div class="overlay paused" id="pauseOverlay" role="dialog" aria-modal="true" aria-labelledby="pauseTitle" hidden>
         <div class="pause-card">
           <h2 id="pauseTitle">Paused</h2>
@@ -326,7 +336,10 @@
       <div class="panel" id="stSwitchPanel">
         <div class="panel-head"><h2>Switch cost</h2></div>
         <div id="stSwitch"></div>
-        <p class="explain">When the question changes from Odd/Even to Low/High (or back), you have to swap rules. Researchers who study task switching call the extra time this takes the switch cost. It’s a rough game measure, not a test of anything about you, and it moves around a lot from game to game.</p>
+        <details class="explain-more">
+          <summary>What is switch cost?</summary>
+          <p class="explain">When the question changes from Odd/Even to Low/High (or back), you have to swap rules. Researchers who study task switching call the extra time this takes the switch cost. It’s a rough game measure, not a test of anything about you, and it moves around a lot from game to game.</p>
+        </details>
       </div>
       <div class="panel" id="stSplitPanel">
         <div class="panel-head"><h2>Accuracy by question</h2></div>
@@ -335,6 +348,7 @@
       <div class="panel" id="stBadgesPanel">
         <div class="panel-head"><h2>Badges <span class="sub" id="stBadgeCount"></span></h2></div>
         <div class="badges" id="stBadges"></div>
+        <button type="button" class="ghost small badges-more" id="stBadgesMore" hidden>Show more</button>
       </div>
       <div class="panel player-panel" id="playerPanel">
         <div class="panel-head"><h2>Player</h2><span class="status" id="playerStatus"></span></div>
@@ -386,6 +400,7 @@
           <span class="badge" id="rBadge" hidden></span>
           <div class="save-line" id="rSave" role="status" data-state="local"></div>
           <div class="xp-line" id="rXp" hidden></div>
+          <div class="r-awards" id="rAwards" hidden></div>
         </div>
         <div class="r-stats">
           <div><b id="rCorrect">0/20</b><span>Correct</span></div>
@@ -412,6 +427,7 @@
               <button type="button" id="rvAll" aria-pressed="false">All answers</button>
             </div>
             <ol class="review-list" id="rReview"></ol>
+            <button type="button" class="ghost small rv-more" id="rvMore" hidden>Show all</button>
           </details>
         </div>
         <div class="r-split" id="rSplitBars"></div>
@@ -460,7 +476,7 @@
     <img class="card-preview" id="cardImg" alt="Score card">
     <div class="sheet-actions">
       <button class="cta" id="saveImgBtn">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg>
+        <svg viewBox="0 0 24 24" aria-hidden="true" id="saveImgIcon"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg>
         <span id="saveImgLabel">Save image</span>
       </button>
       <button class="ghost" id="copyImgBtn">

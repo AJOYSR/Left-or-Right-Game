@@ -60,6 +60,8 @@ addEventListener('pointerdown', () => { usingKeyboard = false; }, true);
 const focusKbd = el => { if (usingKeyboard && el) el.focus(); };
 const toast = (msg, ms = 2600) => {
   const t = $('toast'); t.textContent = msg; t.hidden = false;
+  // during a game the bottom of the screen is the answer pads, so messages show under the HUD
+  t.classList.toggle('top', !$('game').hidden);
   clearTimeout(toast.t); toast.t = setTimeout(() => { t.hidden = true; }, ms);
 };
 // Screen-reader announcements (questions, answers, results).
@@ -95,6 +97,8 @@ function closeDialog(el, returnTo) {
 let soundOn = store.get('sound', true);
 let rounds = ROUND_OPTIONS.includes(store.get('rounds', 20)) ? store.get('rounds', 20) : 20;
 let hard = !!store.get('hard', false);
+let boardR = rounds, boardH = hard;   // which classic board the home leaderboard shows (follows Quick play)
+let badgesExpanded = false;
 const modeKey = (r, h) => (h ? 'h' : 'n') + r;
 const localBest = (r = rounds, h = hard) => store.get('best.' + modeKey(r, h), 0);
 let localPlays = store.get('plays', 0);
@@ -359,10 +363,9 @@ async function startGame(opts = {}) {
   };
   show('game'); resetStage(false);
   const saved = g.gameId ? store.get('progress.' + g.gameId, null) : null;
-  if (saved) resumeFrom(saved);
-  else if (!g.gameId) toast('Offline game: your score stays on this device.');
+  const note = saved ? resumeFrom(saved) || '' : !g.gameId ? 'Offline game: your score stays on this device.' : '';
   track(mode === 'challenge' ? 'challenge_start' : 'play_start');
-  countdown(3, nextRound);
+  countdown(3, nextRound, note);
   return true;
 }
 
@@ -407,14 +410,20 @@ function resumeFrom(sv) {
     else { g.run.answer(null, q.limit); note = 'Picked up where you left off. The open question counted as missed (no pauses left).'; }
   }
   $('hRound').textContent = Math.max(1, g.run.round); $('hScore').textContent = g.run.score; $('hStreak').textContent = g.run.streak;
-  renderPauseBtn(); toast(note); saveProgress();
+  renderPauseBtn(); saveProgress();
+  return note;
 }
 
-function countdown(n, done) {
+// Words, not digits: the questions are digits (and, in Hard, number words), so a "3, 2, 1" in the
+// same spot as the question reads as a question. `note` is shown under it (offline game, resumed run)
+// instead of a toast that would sit over the pads as play starts.
+const COUNT_WORDS = ['Go', 'Set', 'Ready'];
+function countdown(n, done, note = '') {
   const ov = $('countOverlay'); ov.hidden = false;
+  $('countNote').textContent = note; $('countNote').hidden = !note;
   const step = k => {
     if (k === 0) { ov.hidden = true; done(); return; }
-    $('count').textContent = k; bump($('count'), 'pop');
+    $('count').textContent = COUNT_WORDS[k - 1] || COUNT_WORDS[2]; bump($('count'), 'pop');
     beep(k === 1 ? 740 : 520, 0.07);
     countTimer = setTimeout(() => step(k - 1), 650);
   };
@@ -574,7 +583,7 @@ function pauseGame(reason) {
     g.pauses++;
     if (mid) {
       g.run.skip();
-      msg = 'The question on screen counted as missed. Pausing between questions is free: wait for the result before you pause.';
+      msg = 'That question counted as missed. Tip: pausing between questions is free.';
     }
     if (reason === 'away') msg = 'You left the game, so it paused. ' + msg;
   } else if (g.pauses >= MAX_PAUSES) {
@@ -590,11 +599,15 @@ function pauseGame(reason) {
     if (reason === 'away') msg = 'You left the game, so it paused. ' + msg;
   }
   if (!g.tutorial && (g.mode === 'daily' || g.mode === 'challenge')) msg += ' This is your one try, so quitting ends it with the score you have.';
-  if (!g.tutorial) { $('hStreak').textContent = g.run.streak; $('hScore').textContent = g.run.score; saveProgress(); }
+  if (!g.tutorial) {
+    $('hStreak').textContent = g.run.streak; $('hScore').textContent = g.run.score;
+    $('hRound').textContent = Math.min(g.run.round + 1, g.rounds);   // same round the pause card shows
+    saveProgress();
+  }
   $('pauseMsg').textContent = msg;
   $('pRound').textContent = g.tutorial ? `${g.step + 1}/${g.steps.length}` : `${Math.min(g.run.round + 1, g.rounds)}/${g.rounds}`;
   $('pScore').textContent = (g.tutorial ? 0 : g.run.score).toLocaleString();
-  $('pLeftK').textContent = v1Limits() ? 'Pauses left' : 'Pauses';
+  $('pLeftK').textContent = v1Limits() ? 'Pauses left' : 'Pauses used';
   $('pLeft').textContent = g.tutorial ? '–' : v1Limits() ? Math.max(0, MAX_PAUSES - g.pauses) : g.pauses;
   $('pauseMain').hidden = false; $('pauseConfirm').hidden = true;
   document.querySelector('.app').classList.add('is-paused');
@@ -750,7 +763,7 @@ async function finish(ended) {
   } else {
     setSave(run, 'local');
   }
-  celebrate(before);
+  celebrate(before, run);
 }
 
 // Where this game's score is: on the device, on its way, posted, or needing attention.
@@ -815,14 +828,29 @@ function finishPractice() {
   say(`Practice finished. ${s.correct} of ${s.rounds} correct.`);
 }
 
-// After a game: say so when a level or badge is reached.
-function celebrate(before) {
-  const msgs = [];
+// After a game: show a level or badge reached on the results card itself (a toast here would
+// cover the leaderboard and the buttons under it).
+function celebrate(before, run) {
+  const awards = [];
   const L = levelInfo(lifetime().totalScore);
-  if (L.level > before.level) msgs.push(`Level up! You’re now level ${L.level} · ${L.title}`);
-  const now = badgesFromStats(lifetime());
-  for (const b of now) if (b.earned && !before.badges.has(b.id)) msgs.push(`Badge earned: ${b.name}`);
-  msgs.forEach((m, i) => setTimeout(() => { toast(m); beep(990 + i * 120, 0.12, 'triangle'); }, 1400 + i * 2700));
+  if (L.level > before.level) awards.push({ kind: 'level', text: `Level ${L.level} · ${L.title}` });
+  for (const b of badgesFromStats(lifetime())) if (b.earned && !before.badges.has(b.id)) awards.push({ kind: 'badge', text: `Badge: ${b.name}` });
+  if (!awards.length) return;
+  run.awards = awards;
+  if (lastRun === run) renderAwards(awards, true);
+  awards.forEach((_, i) => setTimeout(() => beep(990 + i * 120, 0.12, 'triangle'), 300 + i * 220));
+  say(awards.map(a => a.kind === 'level' ? `Level up: ${a.text}` : `${a.text} earned`).join('. '));
+}
+function renderAwards(awards = [], animate = false) {
+  const box = $('rAwards');
+  box.hidden = !awards.length;
+  box.replaceChildren(...awards.map((a, i) => {
+    const d = document.createElement('span'); d.className = 'award ' + a.kind + (animate ? ' in' : '');
+    d.style.setProperty('--i', i);
+    const ic = document.createElement('i'); ic.setAttribute('aria-hidden', 'true'); ic.textContent = a.kind === 'level' ? '▲' : '★';
+    d.append(ic, a.kind === 'level' ? `Level up: ${a.text}` : a.text);
+    return d;
+  }));
 }
 
 function renderResults(run, { skipCount = false } = {}) {
@@ -839,6 +867,7 @@ function renderResults(run, { skipCount = false } = {}) {
   document.body.classList.toggle('practice-result', practice);
   $('rXp').hidden = !run.score || practice;
   $('rXp').textContent = `+${Math.floor(run.score / 10).toLocaleString()} XP`;
+  renderAwards(run.awards);
   // guests: offer to put a name on this score
   $('saveName').hidden = !(me && me.guest && run.gameId);
   if (me && me.guest) $('guestName').textContent = me.nickname;
@@ -849,6 +878,7 @@ function renderResults(run, { skipCount = false } = {}) {
   $('rStreak').textContent = run.bestStreak;
   // "This run" placing (out of everyone on that board), not the player's all-time best
   $('rRank').textContent = run.place ? `#${run.place}` : '–';
+  $('rRank').parentElement.hidden = !run.place;
   $('rRankK').textContent = run.place && run.of ? `of ${run.of}` : 'Place';
   $('rTitle').textContent = practice ? 'Practice' : run.mode === 'daily' ? `Daily #${dayNumber(run.day)}` : run.mode === 'challenge' ? 'Challenge' : 'Results';
   const tk = takeaway(run);
@@ -915,7 +945,7 @@ function renderStrip(log) {
 // Mistakes first: that's what people open the review for. "All answers" shows every round in order.
 let reviewLog = [], reviewMode = 'miss';
 function renderReview(log) {
-  if (log) reviewLog = log;
+  if (log) { reviewLog = log; reviewExpanded = false; }
   const misses = reviewLog.filter(l => !l.ok).length;
   if (!misses) reviewMode = 'all';
   else if (log) reviewMode = 'miss';
@@ -927,28 +957,45 @@ function renderReview(log) {
   const box = $('rReview');
   const side = (l, d) => { const t = TYPES[l.type]; if (!t || !d) return '–'; const flipped = l.flip ? (d === 'left' ? 'right' : 'left') : d; return flipped === 'left' ? t.left : t.right; };
   const rows = reviewLog.map((l, i) => [l, i]).filter(([l]) => reviewMode === 'all' || !l.ok);
-  box.replaceChildren(...rows.map(([l, i]) => {
+  // Long lists show the first few with a "Show all" button, rather than a box that scrolls inside the page.
+  const shown = reviewExpanded || rows.length <= REVIEW_FOLD + 2 ? rows : rows.slice(0, REVIEW_FOLD);
+  const el = (cls, text) => { const x = document.createElement('span'); x.className = cls; if (text != null) x.textContent = text; return x; };
+  box.replaceChildren(...shown.map(([l, i]) => {
     const li = document.createElement('li');
     li.className = l.ok ? 'ok' : 'no';
     const t = TYPES[l.type];
-    const q = document.createElement('span'); q.className = 'rv-q';
-    q.textContent = t ? `${i + 1}. ${t.left[0] + t.left.slice(1).toLowerCase()} or ${t.right.toLowerCase()}? ${l.n}${l.form && l.form !== 'digit' ? ` (${l.form})` : ''}${l.flip ? ' · swapped' : ''}` : `${i + 1}.`;
-    const a = document.createElement('span'); a.className = 'rv-a';
-    a.textContent = l.paused ? 'Paused during it' : l.d == null ? 'No answer' : l.early ? `${side(l, l.d)} · too early` : `${side(l, l.d)} · ${(l.ms / 1000).toFixed(2)}s`;
-    const m = document.createElement('span'); m.className = 'rv-m'; m.textContent = l.ok ? '✓' : `✗ ${side(l, l.right)}`;
-    m.setAttribute('aria-label', l.ok ? 'right' : `wrong, answer was ${side(l, l.right)}`);
-    li.append(q, a, m);
-    // a short reason under each mistake, when there's a clear one
-    if (!l.ok) {
-      const why = l.paused ? '' : l.early ? 'Answered before reading it.' : l.d == null ? 'Ran out of time.'
-        : l.flip ? 'The sides were swapped this round.' : l.sw ? 'The rule had just changed.' : '';
-      if (why) { const w = document.createElement('span'); w.className = 'rv-why'; w.textContent = why; li.append(w); }
+    const q = el('rv-q', t ? `${i + 1}. ${t.left[0] + t.left.slice(1).toLowerCase()} or ${t.right.toLowerCase()}? ${l.n}${l.form && l.form !== 'digit' ? ` (${l.form})` : ''}${l.flip ? ' · swapped' : ''}` : `${i + 1}.`);
+    const time = l.paused ? 'paused' : l.d == null ? 'no answer' : l.early ? 'too early' : `${(l.ms / 1000).toFixed(2)}s`;
+    if (l.ok) {
+      // right: the question, how fast, and the answer with a tick
+      const m = el('rv-m'); m.append(el('rv-tick', '✓'), side(l, l.right));
+      m.setAttribute('aria-label', `right: ${side(l, l.right)}`);
+      li.append(q, el('rv-a', time), m);
+      return li;
     }
+    // wrong: the right answer sits where a right row's answer does (with a tick, in green); what they
+    // did goes on its own line, struck through, so the two can't be read the wrong way round
+    const m = el('rv-m'); m.append(el('rv-tick', '✓'), side(l, l.right));
+    m.setAttribute('aria-label', `answer: ${side(l, l.right)}`);
+    const you = el('rv-you');
+    you.append('You: ');
+    if (l.d != null && !l.paused) { const pick = el('rv-pick', side(l, l.d)); pick.setAttribute('aria-label', `${side(l, l.d)}, wrong`); you.append(pick, ` · ${time}`); }
+    else you.append(time);
+    const why = l.paused ? '' : l.early ? 'Answered before reading it.' : l.d == null ? 'Ran out of time.'
+      : l.flip ? 'The sides were swapped this round.' : l.sw ? 'The rule had just changed.' : '';
+    if (why) you.append(el('rv-why', why));
+    li.append(q, m, you);
     return li;
   }));
+  const more = $('rvMore');
+  more.hidden = shown.length === rows.length;
+  more.textContent = `Show all ${rows.length}`;
 }
-$('rvMiss').addEventListener('click', () => { reviewMode = 'miss'; renderReview(null); });
-$('rvAll').addEventListener('click', () => { reviewMode = 'all'; renderReview(null); });
+const REVIEW_FOLD = 6;
+let reviewExpanded = false;
+$('rvMore').addEventListener('click', () => { reviewExpanded = true; renderReview(null); });
+$('rvMiss').addEventListener('click', () => { reviewMode = 'miss'; reviewExpanded = false; renderReview(null); });
+$('rvAll').addEventListener('click', () => { reviewMode = 'all'; reviewExpanded = false; renderReview(null); });
 const openReview = () => { const d = $('rReviewBox'); if (d.open) { d.open = false; return; } d.open = true; track('review_open'); d.scrollIntoView({ behavior: reduceMotion.matches ? 'auto' : 'smooth', block: 'start' }); };
 $('rStrip').addEventListener('click', openReview);
 $('reviewBtn').addEventListener('click', openReview);
@@ -970,17 +1017,24 @@ function takeaway(run) {
   const sw = L.filter(l => l.sw === true), rp = L.filter(l => l.sw === false);
   const par = L.filter(l => l.type === 'parity'), siz = L.filter(l => l.type === 'size');
   const k = 'What to work on';
-  if (early >= 2) return { k, t: `${early} answers came in under 0.15 s and counted as guesses. Wait for the number, then move.` };
-  if (slow >= 3) return { k, t: `${slow} questions ran out of time. Read the rule first; once you know it, the number is quick.` };
-  if (flip >= 2) return { k, t: `${flip} misses were on swapped sides. When the sides swap, follow the words on the pads, not habit.` };
+  // Each pattern that applies is a candidate, weighted by how many misses it explains; the biggest
+  // one wins (ties go to the earlier, more actionable one). Before, the first match won, so 3 misses
+  // on swapped sides could hide 10 missed Low/High questions.
+  const cands = [];
+  if (early >= 2) cands.push({ n: early, t: `${early} answers came in under 0.15 s and counted as guesses. Wait for the number, then move.` });
+  if (slow >= 3) cands.push({ n: slow, t: `${slow} questions ran out of time. Read the rule first; once you know it, the number is quick.` });
+  if (flip >= 2) cands.push({ n: flip, t: `${flip} misses were on swapped sides. When the sides swap, follow the words on the pads, not habit.` });
   if (sw.length >= 3 && rp.length >= 3 && rate(rp) - rate(sw) >= 0.2) {
     const m = sw.filter(l => !l.ok).length;
-    return { k, t: `Most misses came right after the rule changed (${m} of ${sw.length} switch questions). Check the rule before the number.` };
+    cands.push({ n: m, t: `Most misses came right after the rule changed (${m} of ${sw.length} switch questions). Check the rule before the number.` });
   }
   if (par.length && siz.length && Math.abs(rate(par) - rate(siz)) >= 0.15) {
     const [weak, wl, strong, sl] = rate(par) < rate(siz) ? ['Odd/Even', par, 'Low/High', siz] : ['Low/High', siz, 'Odd/Even', par];
-    return { k, t: `You missed more ${weak} questions: ${wl.filter(l => l.ok).length}/${wl.length} right, against ${sl.filter(l => l.ok).length}/${sl.length} for ${strong}.` };
+    const right = wl.filter(l => l.ok).length;
+    const tip = right === 0 ? ` Check the rule above the number: ${weak === 'Low/High' ? '1–4 is low, 6–9 is high' : '1, 3, 7, 9 are odd'}.` : '';
+    cands.push({ n: wl.length - right, t: `You missed more ${weak} questions: ${right}/${wl.length} right, against ${sl.filter(l => l.ok).length}/${sl.length} for ${strong}.${tip}` });
   }
+  if (cands.length) return { k, t: cands.reduce((best, c) => (c.n > best.n ? c : best)).t };
   if (swCost != null && swCost >= 150) return { k, t: `You were ${swCost} ms slower right after the rule changed. That gap shrinks with practice.` };
   return { k, t: `${miss.length} miss${miss.length > 1 ? 'es' : ''}, spread across question types. Review them to spot a pattern.` };
 }
@@ -1026,8 +1080,8 @@ function renderSetup() {
   $('youBestK').textContent = `Best (${rounds}${hard ? ', Hard' : ''})`;
   $('levelInfo').hidden = !hard;
 }
-$('roundsSeg').addEventListener('click', e => { const b = e.target.closest('button[data-r]'); if (!b) return; rounds = +b.dataset.r; store.set('rounds', rounds); renderSetup(); refreshBoards(); });
-$('levelSeg').addEventListener('click', e => { const b = e.target.closest('button[data-h]'); if (!b) return; hard = !!+b.dataset.h; store.set('hard', hard); renderSetup(); refreshBoards(); });
+$('roundsSeg').addEventListener('click', e => { const b = e.target.closest('button[data-r]'); if (!b) return; rounds = +b.dataset.r; store.set('rounds', rounds); boardR = rounds; boardH = hard; renderSetup(); refreshBoards(); });
+$('levelSeg').addEventListener('click', e => { const b = e.target.closest('button[data-h]'); if (!b) return; hard = !!+b.dataset.h; store.set('hard', hard); boardR = rounds; boardH = hard; renderSetup(); refreshBoards(); });
 renderSetup();
 
 // ================= remote data (cached for offline) =================
@@ -1085,6 +1139,18 @@ async function refreshBoards() {
     if (seq === boardsSeq) dataState = 'ready';
   } catch (e) { if (seq === boardsSeq) dataState = e.offline ? 'offline' : 'error'; }
   renderAll();
+  if (boardR !== r0 || boardH !== h0) fetchBoard(boardR, boardH);
+}
+
+// One classic board on its own (the home leaderboard's length picker), when it isn't the Quick play one.
+async function fetchBoard(r, h) {
+  if (!online) return;
+  try {
+    const res = await api('boards', { rounds: r, hard: h, day: todayKey });
+    boards[modeKey(r, h)] = { all: res.all, week: res.week };
+    store.set('cache.boards', boards);
+  } catch {}
+  renderHomeBoard();
 }
 
 async function refreshRemote() {
@@ -1155,10 +1221,17 @@ function renderList(olId, emptyId, data, max = 10) {
   }));
   if (!empty) return;
   empty.hidden = list.length > 0;
+  const noPlayer = !getToken() && online && dataState !== 'loading';
   empty.textContent = dataState === 'loading' && !list.length ? 'Loading scores…'
-    : !getToken() && !list.length ? 'No scores yet. Pick a nickname and take first place.'
+    : noPlayer && !list.length ? 'No scores yet. Pick a nickname and take first place.'
     : !online && !list.length ? 'You’re offline. Leaderboards load when you’re back.'
     : data.empty;
+  // the empty state names an action, so offer it right there
+  if (noPlayer && !list.length) {
+    const b = document.createElement('button'); b.type = 'button'; b.className = 'ghost small empty-cta'; b.textContent = 'Pick a nickname';
+    b.addEventListener('click', () => askNickname(null));
+    empty.append(document.createElement('br'), b);
+  }
 }
 
 function renderAll() {
@@ -1178,14 +1251,24 @@ function renderNet() {
 }
 $('attnDismiss').addEventListener('click', () => { outbox.failed().forEach(x => outbox.remove(x.gameId)); renderNet(); });
 function renderHomeBoard() {
-  const data = boardData(boardView);
+  const classic = boardView === 'classic';
+  const data = classic ? boardData('classic', boardR, boardH) : boardData(boardView);
   $('boardSub').textContent = data.sub;
-  $('periodSeg').hidden = boardView !== 'classic';
+  $('boardSub').hidden = classic;   // the length picker says it
+  $('boardTools').hidden = !classic;
+  $('boardMode').value = `${boardR}:${boardH ? 1 : 0}`;
   $('viewClassic').setAttribute('aria-pressed', String(boardView === 'classic'));
   $('viewDaily').setAttribute('aria-pressed', String(boardView === 'daily'));
   renderList('board', 'boardEmpty', data);
 }
 $('viewClassic').addEventListener('click', () => { boardView = 'classic'; renderHomeBoard(); });
+$('boardMode').addEventListener('change', e => {
+  const [r, h] = e.target.value.split(':');
+  boardR = +r; boardH = h === '1';
+  renderHomeBoard();
+  fetchBoard(boardR, boardH);
+});
+$('stBadgesMore').addEventListener('click', () => { badgesExpanded = true; renderStats(); });
 $('viewDaily').addEventListener('click', () => { boardView = 'daily'; renderHomeBoard(); });
 for (const [id, p] of [['tabAll', 'all'], ['tabWeek', 'week']]) {
   $(id).addEventListener('click', () => {
@@ -1220,7 +1303,12 @@ function renderYou() {
   const best = Math.max(localBest(), myBest(rounds, hard));
   $('youBest').textContent = best ? best.toLocaleString() : '–';
   $('youRank').textContent = idx >= 0 ? `#${idx + 1}` : '–';
-  $('youPlays').textContent = Math.max(lt.games, statGames().length) || localPlays;
+  const plays = Math.max(lt.games, statGames().length) || localPlays;
+  $('youPlays').textContent = plays;
+  // only show numbers that exist: a new player sees their level and nothing else
+  $('youBest').parentElement.hidden = !best;
+  $('youRank').parentElement.hidden = idx < 0;
+  $('youPlays').parentElement.parentElement.hidden = !plays;
   // returning players get a short greeting instead of the full intro and rules
   const returning = statGames().length > 0;
   document.body.classList.toggle('returning', returning);
@@ -1260,12 +1348,13 @@ function renderDaily() {
   $('dailyWeek').replaceChildren(...Array.from({ length: 7 }, (_, i) => addDays(monday, i)).map(k2 => {
     const d = document.createElement('div');
     const played = hist[k2] != null, frozen = st.usedOn.includes(k2);
-    d.className = [played ? 'done' : '', frozen ? 'frozen' : '', k2 === todayKey ? 'today' : '', k2 > todayKey ? 'future' : ''].join(' ').trim();
+    const before = dayNumber(k2) < 1;
+    d.className = [played ? 'done' : '', frozen ? 'frozen' : '', k2 === todayKey ? 'today' : '', k2 > todayKey || before ? 'future' : ''].join(' ').trim();
     const dot = document.createElement('i');
     if (played) dot.innerHTML = '<svg viewBox="0 0 24 24"><path d="m5 12 5 5 9-10"/></svg>';
     else if (frozen) { dot.innerHTML = '<svg viewBox="0 0 24 24"><path d="M12 3v18M5 7.5l14 9M19 7.5l-14 9"/></svg>'; d.title = 'Covered by a streak freeze'; }
     const lab = document.createElement('span'); lab.textContent = keyToDate(k2).toLocaleDateString(undefined, { weekday: 'narrow' });
-    if (!frozen) d.title = keyToDate(k2).toLocaleDateString(undefined, { weekday: 'long' }) + (played ? `: ${hist[k2].toLocaleString()}` : '');
+    if (!frozen) d.title = keyToDate(k2).toLocaleDateString(undefined, { weekday: 'long' }) + (played ? `: ${hist[k2].toLocaleString()}` : before ? ': before the first Daily' : '');
     d.append(dot, lab);
     return d;
   }));
@@ -1371,12 +1460,19 @@ function renderStats() {
   const lv = levelInfo(lt.totalScore);
   $('stLevelSub').textContent = `${lv.level} · ${lv.title}`;
   $('stLevelFill').style.width = `${Math.round(lv.progress * 100)}%`;
-  $('stLevelNext').textContent = `${(lv.need - lv.into).toLocaleString()} XP to level ${lv.level + 1}. Every 10 points you score is 1 XP.`;
+  $('stLevelNext').textContent = `${(lv.need - lv.into).toLocaleString()} XP to level ${lv.level + 1}. Every 10 points you score is 1\u00a0XP.`;
   const bs = badgesFromStats(lt);
   $('stBadgeCount').textContent = `${bs.filter(b => b.earned).length} of ${bs.length}`;
-  $('stBadges').replaceChildren(...bs.map(b => {
+  const earned = bs.filter(b => b.earned), locked = bs.filter(b => !b.earned);
+  // earned badges, then the next two or three to aim for; the rest wait behind a button
+  const nextUp = (earned.length + 2) % 2 ? 3 : 2;   // fill the two-column grid's last row
+  const shownB = badgesExpanded ? [...earned, ...locked] : [...earned, ...locked.slice(0, nextUp)];
+  $('stBadgesMore').hidden = shownB.length === bs.length;
+  $('stBadgesMore').textContent = `Show ${bs.length - shownB.length} more to earn`;
+  $('stBadges').replaceChildren(...shownB.map(b => {
     const d = document.createElement('div'); d.className = 'badge-item' + (b.earned ? '' : ' locked');
-    const m = document.createElement('div'); m.className = 'medal'; m.textContent = b.earned ? '★' : '?';
+    const m = document.createElement('div'); m.className = 'medal'; m.textContent = b.earned ? '★' : '';
+    m.setAttribute('aria-label', b.earned ? 'Earned' : 'Not earned yet');
     const n = document.createElement('b'); n.textContent = b.name;
     const t = document.createElement('span'); t.textContent = b.desc;
     d.append(m, n, t); return d;
@@ -1618,6 +1714,9 @@ async function openShare(kind, run) {
   cardUrl = URL.createObjectURL(cardBlob);
   $('cardImg').src = cardUrl;
   $('saveImgLabel').textContent = canNativeShare() ? 'Share image' : 'Save image';
+  $('saveImgIcon').innerHTML = canNativeShare()
+    ? '<path d="M12 3v12"/><path d="m7 8 5-5 5 5"/><path d="M5 13v6a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-6"/>'
+    : '<path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/>';
   $('copyImgBtn').hidden = !(window.ClipboardItem && navigator.clipboard && navigator.clipboard.write);
 }
 function closeShare() { closeDialog($('shareScrim'), shareOpener); }
