@@ -1,0 +1,7 @@
+.env*
+.vercel
+tests
+scripts
+README.md
+.gitignore
+node_modules

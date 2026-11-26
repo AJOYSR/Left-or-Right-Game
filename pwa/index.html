@@ -1,0 +1,429 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Left or Right</title>
+<meta name="description" content="A three-second reflex game: odd or even, low or high. Daily challenge, friend challenges and leaderboards.">
+<meta name="theme-color" content="#eef0f5" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0d0f15" media="(prefers-color-scheme: dark)">
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="icon" href="/icons/icon-32.png" sizes="32x32" type="image/png">
+<link rel="icon" href="/icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Left or Right">
+<link rel="canonical" href="https://left-or-right-peach.vercel.app/">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Left or Right">
+<meta property="og:url" content="https://left-or-right-peach.vercel.app/">
+<meta property="og:title" content="Left or Right">
+<meta property="og:description" content="Odd or even. Low or high. Three seconds. Daily challenge, friend challenges and leaderboards.">
+<meta property="og:image" content="https://left-or-right-peach.vercel.app/api/og">
+<meta property="og:image:type" content="image/png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:image" content="https://left-or-right-peach.vercel.app/api/og">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800&family=Inter:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="/styles.css">
+<script type="module" src="/src/main.js"></script>
+</head>
+<body>
+<div class="app">
+
+  <!-- HOME -->
+  <section class="screen" id="home">
+    <header class="bar">
+      <div class="brand"><span class="brand-mark"><i></i><i></i></span>Left or Right</div>
+      <div class="bar-btns">
+      <button class="icon-btn install-btn" id="installBtn" aria-label="Install the app" title="Install the app" hidden>
+        <svg viewBox="0 0 24 24"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg>
+      </button>
+      <button class="icon-btn" id="statsBtn" aria-label="Your stats" title="Your stats">
+        <svg viewBox="0 0 24 24"><path d="M4 20V10"/><path d="M10 20V4"/><path d="M16 20v-7"/><path d="M22 20H2"/></svg>
+      </button>
+      <div class="menu-wrap">
+        <button class="icon-btn" id="settingsBtn" aria-label="Settings" title="Settings" aria-haspopup="true" aria-expanded="false" aria-controls="settingsMenu">
+          <svg viewBox="0 0 24 24"><path d="M4 7h10"/><path d="M18 7h2"/><circle cx="16" cy="7" r="2"/><path d="M4 17h4"/><path d="M12 17h8"/><circle cx="10" cy="17" r="2"/></svg>
+        </button>
+        <div class="menu" id="settingsMenu" role="menu" aria-label="Settings" hidden>
+          <button class="menu-item" id="themeBtn" role="menuitem"><svg viewBox="0 0 24 24" id="themeIcon"></svg><span id="themeLabel">Dark mode</span></button>
+          <button class="menu-item" id="soundBtn" role="menuitem"><svg viewBox="0 0 24 24" id="soundIcon"></svg><span id="soundLabel">Sound on</span></button>
+          <button class="menu-item" id="sizeBtn" role="menuitem"><svg viewBox="0 0 24 24"><path d="M4 18 9 6l5 12"/><path d="M5.8 14h6.4"/><path d="M15 18l3-7 3 7"/><path d="M16 16h4"/></svg><span id="sizeLabel">Text size: normal</span></button>
+          <div class="menu-sep" role="separator"></div>
+          <button class="menu-item" id="howMenuBtn" role="menuitem"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.6.3-1 .9-1 1.6v.4"/><path d="M12 17.5v.01"/></svg><span>How to play</span></button>
+        </div>
+      </div>
+      </div>
+    </header>
+
+    <div class="scroll">
+      <div class="net-note" id="netNote" role="status" hidden></div>
+      <div class="hero">
+        <h1 id="heroTitle">Odd or even. Low or high. Three seconds.</h1>
+        <p id="heroSub">A number from 1 to 9 appears, never 5. Answer the question before the ring runs out. Faster answers and longer streaks score more.</p>
+      </div>
+
+      <div class="panel challenge-card" id="challengeCard" hidden>
+        <div class="eyebrow">Challenge from a friend</div>
+        <h2 id="cTitle">Same 20 questions. Beat their score.</h2>
+        <p class="card-sub" id="cSub">You get exactly the questions they played.</p>
+        <ol class="board" id="cBoard"></ol>
+        <div class="card-btns" id="cBtns">
+          <button class="ghost" id="cDismiss">Not now</button>
+          <button class="cta" id="cAccept">Accept challenge</button>
+        </div>
+      </div>
+
+      <div class="panel daily-card" id="dailyCard">
+        <div class="daily-head">
+          <div>
+            <div class="eyebrow">Daily challenge</div>
+            <h2><span id="dailyTitle">Daily #1</span> <span class="sub" id="dailyDate"></span></h2>
+          </div>
+          <div class="streak-pill" id="dayStreak" hidden title="Days in a row">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2c1 3.5 5 6 5 11a5 5 0 0 1-10 0c0-2.2 1-3.8 2.4-5 .2 1.7 1 2.8 2.1 3.2C11 8.6 11.3 5 12 2Z"/></svg>
+            <span class="pill-k"><span id="dayStreakN">0</span>-day streak</span>
+          </div>
+        </div>
+        <div class="week" id="dailyWeek" aria-label="Daily challenges played this week"></div>
+        <div id="dailyPlay">
+          <p class="card-sub">The same 20 questions for everyone today. One try, so make it count.</p>
+          <button class="cta" id="dailyBtn">Play today’s challenge</button>
+        </div>
+        <div id="dailyDone" hidden>
+          <div class="daily-result">
+            <div><b id="dailyScore">0</b><span>Your score</span></div>
+            <div><b id="dailyRank">–</b><span>Today’s rank</span></div>
+            <div><b id="dailyNext">–</b><span>Next challenge</span></div>
+          </div>
+          <button class="ghost share-btn" id="dailyShareBtn">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12"/><path d="m7 8 5-5 5 5"/><path d="M5 13v6a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-6"/></svg>
+            Share today’s result
+          </button>
+        </div>
+      </div>
+
+      <div class="rules">
+        <div class="rule">
+          <h3>Odd or Even?</h3>
+          <div class="row"><span class="chip l">← ODD</span><span class="nums">1 3 7 9</span></div>
+          <div class="row"><span class="chip r">EVEN →</span><span class="nums">2 4 6 8</span></div>
+        </div>
+        <div class="rule">
+          <h3>Low or High?</h3>
+          <div class="row"><span class="chip l">← LOW</span><span class="nums">1 2 3 4</span></div>
+          <div class="row"><span class="chip r">HIGH →</span><span class="nums">6 7 8 9</span></div>
+        </div>
+      </div>
+
+      <div class="panel" id="youPanel">
+        <div class="panel-head"><h2>You</h2><span class="status" id="youStatus"></span></div>
+        <div class="you-row">
+          <div class="you-stat"><div class="v" id="youBest">–</div><div class="k" id="youBestK">Best score</div></div>
+          <div class="you-stat"><div class="v" id="youRank">–</div><div class="k">Rank</div></div>
+          <div class="you-stat"><div class="v" id="youPlays">0</div><div class="k">Games played</div></div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-head">
+          <h2>Leaderboard <span class="sub" id="boardSub">20 rounds</span></h2>
+          <div class="seg" role="group" aria-label="Leaderboard" id="viewSeg">
+            <button id="viewClassic" aria-pressed="true">Classic</button>
+            <button id="viewDaily" aria-pressed="false">Daily</button>
+          </div>
+        </div>
+        <div class="seg period" role="group" aria-label="Leaderboard period" id="periodSeg">
+          <button id="tabAll" aria-pressed="true">All time</button>
+          <button id="tabWeek" aria-pressed="false">This week</button>
+        </div>
+        <ol class="board" id="board"></ol>
+        <div class="empty" id="boardEmpty">Loading scores…</div>
+      </div>
+    </div>
+
+    <div class="dock">
+    <div class="setups">
+    <div class="setup">
+      <span class="setup-label sr-only" id="roundsLabel">Rounds</span>
+      <div class="seg seg-lg" role="group" aria-labelledby="roundsLabel" id="roundsSeg">
+        <button data-r="15" aria-pressed="false">15</button>
+        <button data-r="20" aria-pressed="true">20</button>
+        <button data-r="30" aria-pressed="false">30</button>
+        <button data-r="50" aria-pressed="false">50</button>
+      </div>
+    </div>
+    <div class="setup">
+      <span class="setup-label sr-only" id="levelLabel">Level</span>
+      <div class="seg seg-lg" role="group" aria-labelledby="levelLabel" id="levelSeg">
+        <button data-h="0" aria-pressed="true">Normal</button>
+        <button data-h="1" aria-pressed="false">Hard</button>
+      </div>
+    </div>
+    </div>
+    <p class="level-info" id="levelInfo" hidden>Hard: the timer shrinks to 1.5 s, sides sometimes swap, and numbers can show as words or dots.</p>
+    <button class="cta" id="playBtn">Play 20 rounds</button>
+    <div class="hint"><button class="link" id="howBtn">How to play</button><span class="kbd-only"> · Play with <kbd>←</kbd> <kbd>→</kbd> or <kbd>A</kbd> <kbd>D</kbd></span></div>
+    </div>
+  </section>
+
+  <!-- GAME -->
+  <section class="screen" id="game" hidden>
+    <div class="hud" id="hud">
+      <div class="hud-round">
+        <div class="k" id="hRoundK">Round</div><div class="v"><span id="hRound">1</span><span class="of" id="hOf">/20</span></div>
+        <div class="tut-steps" id="tutSteps" aria-hidden="true"></div>
+      </div>
+      <div><div class="k">Score</div><div class="v" id="hScore">0</div></div>
+      <div><div class="k">Streak</div><div class="v" id="hStreak">0</div></div>
+      <button class="hud-pause" id="pauseBtn" aria-label="Pause game" title="Pause (P)">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="5" width="4" height="14" rx="1.5"/><rect x="14" y="5" width="4" height="14" rx="1.5"/></svg>
+      </button>
+      <button class="skip" id="skipBtn" aria-label="Skip practice and start the game" hidden>
+        <span>Skip</span>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 6 6-6 6"/><path d="m13 6 6 6-6 6"/></svg>
+      </button>
+    </div>
+
+    <div class="stage" id="stage">
+      <div class="prompt" id="prompt"><span class="chip l" id="pL">ODD</span><span>or</span><span class="chip r" id="pR">EVEN</span></div>
+      <div class="swap-tag" id="swapTag" hidden>Sides swapped</div>
+      <div class="dial">
+        <svg viewBox="0 0 100 100" aria-hidden="true">
+          <circle class="track" cx="50" cy="50" r="46"/>
+          <circle class="ring" id="ring" cx="50" cy="50" r="46"/>
+        </svg>
+        <div class="number" id="num" aria-live="polite">6</div>
+      </div>
+      <div class="verdict" id="verdict"></div>
+      <div class="coach" id="coach" hidden></div>
+      <div class="swipe-hint" id="swipeHint"><span class="touch-only">Swipe left or right, or tap a pad</span><span class="kbd-only">Press ← or →, or click a pad</span></div>
+
+      <div class="overlay" id="readyOverlay" hidden>
+        <div>
+          <h2>You’re ready</h2>
+          <p id="readyText">Each answer now has 3 seconds, and the question can switch at any time.</p>
+          <div class="ready-btns">
+            <button class="ghost" id="practiceAgainBtn">Practice again</button>
+            <button class="cta" id="readyPlayBtn">Play 20 rounds</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="overlay" id="countOverlay" hidden><div class="count" id="count">3</div></div>
+      <div class="overlay paused" id="pauseOverlay" role="dialog" aria-modal="true" aria-labelledby="pauseTitle" hidden>
+        <div class="pause-card">
+          <h2 id="pauseTitle">Paused</h2>
+          <p id="pauseMsg">Take your time.</p>
+          <div class="pause-stats">
+            <div><b id="pRound">1/20</b><span>Round</span></div>
+            <div><b id="pScore">0</b><span>Score</span></div>
+            <div><b id="pLeft">3</b><span>Pauses left</span></div>
+          </div>
+          <div class="pause-rules" id="pauseRules">
+            <span><span class="chip l">← ODD</span> <span class="chip r">EVEN →</span></span>
+            <span><span class="chip l">← LOW</span> <span class="chip r">HIGH →</span></span>
+          </div>
+          <div id="pauseMain" class="pause-actions">
+            <button class="cta" id="resumeBtn">Resume</button>
+            <div class="pause-row">
+              <button class="ghost" id="restartBtn">Restart</button>
+              <button class="ghost" id="quitBtn">Quit</button>
+            </div>
+          </div>
+          <div id="pauseConfirm" class="pause-actions" hidden>
+            <p class="confirm-text" id="confirmText">Quit this game? This score won’t be saved.</p>
+            <div class="pause-row">
+              <button class="ghost" id="confirmNo">Keep playing</button>
+              <button class="ghost danger" id="confirmYes">Quit</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="pads">
+      <button class="pad l" id="padL" aria-label="Left answer"><span id="padLText">ODD</span><small><span class="touch-only">← swipe left</span><span class="kbd-only">← key</span></small></button>
+      <button class="pad r" id="padR" aria-label="Right answer"><span id="padRText">EVEN</span><small><span class="touch-only">swipe right →</span><span class="kbd-only">→ key</span></small></button>
+    </div>
+  </section>
+
+  <!-- STATS -->
+  <section class="screen" id="stats" hidden>
+    <header class="bar">
+      <button class="icon-btn" id="statsBack" aria-label="Back to home">
+        <svg viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"/></svg>
+      </button>
+      <div class="brand">Your stats</div>
+      <span class="bar-spacer"></span>
+    </header>
+    <div class="scroll">
+      <div class="panel player-panel" id="playerPanel">
+        <div class="panel-head"><h2>Player</h2><span class="status" id="playerStatus"></span></div>
+        <div class="player-row">
+          <div class="player-name"><span class="k">Nickname</span><b id="pName">–</b></div>
+          <button class="ghost small" id="renameBtn">Change</button>
+        </div>
+        <details class="code-box">
+          <summary>Play on another device</summary>
+          <div class="code-body">
+            <div class="code-step" id="copyStep">
+              <p class="card-sub">Copy your player code, then paste it on the other device to keep your scores and stats there.</p>
+              <button class="ghost small" id="copyCodeBtn">Copy my player code</button>
+            </div>
+            <div class="code-step">
+              <label class="field-label" for="codeInput">Have a code from another device?</label>
+              <div class="code-row">
+                <input id="codeInput" class="field" autocomplete="off" spellcheck="false" placeholder="Paste player code">
+                <button class="ghost small" id="useCodeBtn">Use code</button>
+              </div>
+            </div>
+          </div>
+        </details>
+      </div>
+      <div class="st-tiles" id="stTiles"></div>
+      <div class="panel" id="stTrendPanel">
+        <div class="panel-head"><h2>Score trend <span class="sub">points per round, last 30 games</span></h2></div>
+        <div class="chart" id="stTrend"></div>
+      </div>
+      <div class="panel" id="stSwitchPanel">
+        <div class="panel-head"><h2>Switch cost</h2></div>
+        <div id="stSwitch"></div>
+        <p class="explain">When the question changes from Odd/Even to Low/High (or back), your brain has to swap rules. Psychologists call the extra time this takes the switch cost. Practice shrinks it.</p>
+      </div>
+      <div class="panel" id="stSplitPanel">
+        <div class="panel-head"><h2>Accuracy by question</h2></div>
+        <div id="stSplit"></div>
+      </div>
+      <div class="panel empty-panel" id="stEmpty" hidden>
+        <h2>No games yet</h2>
+        <p class="card-sub">Play a game and your score trend, accuracy and switch cost show up here.</p>
+        <button class="cta" id="stPlay">Play a game</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- RESULTS -->
+  <section class="screen" id="results" hidden>
+    <div class="scroll">
+      <div class="result-card">
+        <div class="result-top">
+          <div class="label" id="rLabel">Score</div>
+          <div class="big" id="rScore">0</div>
+          <span class="badge" id="rBadge" hidden></span>
+        </div>
+        <div class="r-stats">
+          <div><b id="rCorrect">0/20</b><span>Correct</span></div>
+          <div><b id="rAvg">–</b><span>Avg time</span></div>
+          <div><b id="rStreak">0</b><span>Best streak</span></div>
+          <div><b id="rRank">–</b><span>Rank</span></div>
+        </div>
+        <div class="r-strip-wrap">
+          <div class="r-strip-head"><span>Every answer</span><span class="r-legend"><i class="ok"></i>right <i class="no"></i>wrong · taller is faster</span></div>
+          <div class="r-strip" id="rStrip" role="img" aria-label="Your answers"></div>
+        </div>
+        <div class="r-split" id="rSplitBars"></div>
+        <p class="r-note" id="rSplit" hidden></p>
+      </div>
+
+      <div class="r-actions">
+        <button class="action" id="shareBtn">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12"/><path d="m7 8 5-5 5 5"/><path d="M5 13v6a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-6"/></svg>
+          Share score
+        </button>
+        <button class="action" id="challengeBtn">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0"/><path d="M19 8v6"/><path d="M16 11h6"/></svg>
+          Challenge a friend
+        </button>
+      </div>
+
+      <div class="panel">
+        <div class="panel-head"><h2><span id="rBoardTitle">Leaderboard</span> <span class="sub" id="boardSub2">20 rounds</span></h2><span class="status" id="saveStatus"></span></div>
+        <ol class="board" id="board2"></ol>
+        <div class="empty" id="boardEmpty2" hidden></div>
+      </div>
+    </div>
+    <div class="row-btns dock">
+      <button class="ghost" id="homeBtn">Home</button>
+      <button class="cta" id="againBtn">Play again</button>
+    </div>
+  </section>
+</div>
+
+<!-- SHARE SHEET -->
+<div class="scrim" id="shareScrim" hidden>
+  <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="shareTitle">
+    <div class="sheet-head">
+      <h2 id="shareTitle">Share your score</h2>
+      <button class="icon-btn" id="shareClose" aria-label="Close">
+        <svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg>
+      </button>
+    </div>
+    <img class="card-preview" id="cardImg" alt="Score card">
+    <div class="sheet-actions">
+      <button class="cta" id="saveImgBtn">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg>
+        <span id="saveImgLabel">Save image</span>
+      </button>
+      <button class="ghost" id="copyImgBtn">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="9" cy="9" r="2"/><path d="m21 15-5-5L5 21"/></svg>
+        Copy image
+      </button>
+      <button class="ghost" id="copyTextBtn">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>
+        <span id="copyTextLabel">Copy text</span>
+      </button>
+    </div>
+    <div class="socials" id="socials">
+      <a class="social" id="sX" target="_blank" rel="noopener noreferrer"><svg viewBox="0 0 24 24"><path d="M17.8 3h3.1l-6.8 7.7 8 10.3h-6.2l-4.9-6.3L5.4 21H2.3l7.3-8.3L2 3h6.4l4.4 5.8L17.8 3Zm-1.1 16.2h1.7L7.4 4.7H5.6l11.1 14.5Z"/></svg>X</a>
+      <a class="social" id="sWa" target="_blank" rel="noopener noreferrer"><svg viewBox="0 0 24 24"><path d="M12 2a10 10 0 0 0-8.6 15.1L2 22l5-1.3A10 10 0 1 0 12 2Zm0 18.2a8.2 8.2 0 0 1-4.2-1.2l-.3-.2-3 .8.8-2.9-.2-.3A8.2 8.2 0 1 1 12 20.2Zm4.5-6.1c-.2-.1-1.5-.7-1.7-.8-.2-.1-.4-.1-.6.1l-.8 1c-.1.2-.3.2-.5.1a6.7 6.7 0 0 1-3.3-2.9c-.3-.4.2-.4.7-1.4.1-.2 0-.3 0-.4l-.8-1.8c-.2-.5-.4-.4-.6-.4h-.5a1 1 0 0 0-.7.3 3 3 0 0 0-.9 2.2 5.2 5.2 0 0 0 1.1 2.7 11.8 11.8 0 0 0 4.5 4c1.7.7 2.3.8 3.2.6.5-.1 1.5-.6 1.7-1.2.2-.6.2-1.1.2-1.2-.1-.1-.3-.2-.5-.3Z"/></svg>WhatsApp</a>
+      <a class="social" id="sFb" target="_blank" rel="noopener noreferrer"><svg viewBox="0 0 24 24"><path d="M22 12a10 10 0 1 0-11.6 9.9v-7H7.9V12h2.5V9.8c0-2.5 1.5-3.9 3.8-3.9 1.1 0 2.2.2 2.2.2v2.5h-1.3c-1.2 0-1.6.8-1.6 1.6V12h2.8l-.4 2.9h-2.3v7A10 10 0 0 0 22 12Z"/></svg>Facebook</a>
+      <a class="social" id="sLi" target="_blank" rel="noopener noreferrer"><svg viewBox="0 0 24 24"><path d="M20.4 2H3.6A1.6 1.6 0 0 0 2 3.6v16.8A1.6 1.6 0 0 0 3.6 22h16.8a1.6 1.6 0 0 0 1.6-1.6V3.6A1.6 1.6 0 0 0 20.4 2ZM8 19H5V9.5h3V19ZM6.5 8.2a1.7 1.7 0 1 1 0-3.5 1.7 1.7 0 0 1 0 3.5ZM19 19h-3v-4.6c0-1.1 0-2.5-1.5-2.5S12.7 13 12.7 14.3V19h-3V9.5h2.8v1.3a3.1 3.1 0 0 1 2.8-1.5c3 0 3.6 2 3.6 4.6V19Z"/></svg>LinkedIn</a>
+      <a class="social" id="sTg" target="_blank" rel="noopener noreferrer"><svg viewBox="0 0 24 24"><path d="M21.9 4.3 18.8 19c-.2 1-.8 1.3-1.7.8l-4.6-3.4-2.2 2.1c-.3.3-.5.5-1 .5l.3-4.7 8.6-7.8c.4-.3-.1-.5-.6-.2L7 12.9 2.4 11.5c-1-.3-1-1 .2-1.5l18-6.9c.8-.3 1.6.2 1.3 1.2Z"/></svg>Telegram</a>
+    </div>
+    <p class="sheet-note" id="shareNote">These apps open with your score and the game link filled in. To post the picture too, save or copy the image first and attach it.</p>
+  </div>
+</div>
+<div class="toast" id="toast" role="status" hidden></div>
+
+
+<!-- NICKNAME -->
+<div class="scrim" id="nickScrim" hidden>
+  <form class="sheet nick-sheet" id="nickForm" role="dialog" aria-modal="true" aria-labelledby="nickTitle" novalidate>
+    <div class="sheet-head">
+      <h2 id="nickTitle">Pick a nickname</h2>
+      <button type="button" class="icon-btn" id="nickClose" aria-label="Close">
+        <svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg>
+      </button>
+    </div>
+    <p class="card-sub">It shows on the leaderboards. No email or password needed.</p>
+    <label class="field-label" for="nickInput">Nickname</label>
+    <input id="nickInput" class="field" maxlength="20" autocomplete="nickname" autocapitalize="words" spellcheck="false" placeholder="e.g. QuickThumbs">
+    <p class="field-error" id="nickError" hidden></p>
+    <button class="cta" id="nickSave" type="submit">Start playing</button>
+    <button class="link" type="button" id="nickOffline">Play without a nickname (scores stay on this device)</button>
+  </form>
+</div>
+
+<!-- iPHONE INSTALL HINT -->
+<div class="scrim" id="iosScrim" hidden>
+  <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="iosTitle">
+    <div class="sheet-head">
+      <h2 id="iosTitle">Add to your Home Screen</h2>
+      <button class="icon-btn" id="iosClose" aria-label="Close"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
+    </div>
+    <ol class="ios-steps">
+      <li>Tap the <b>Share</b> button <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12"/><path d="m7 8 5-5 5 5"/><path d="M5 13v6a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-6"/></svg> in Safari’s toolbar.</li>
+      <li>Choose <b>Add to Home Screen</b>.</li>
+      <li>Tap <b>Add</b>. Left or Right opens full screen and works offline.</li>
+    </ol>
+  </div>
+</div>
+</body>
+</html>
