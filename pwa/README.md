@@ -43,6 +43,9 @@ installed copies pick up the new files.
 - The server picks every game's questions, times it, and re-scores it from the answers. It rejects
   runs that finish faster than the clock allows, answers that are superhumanly fast or machine-steady,
   and replays or double submits. The database also refuses impossible scores.
+- What this does **not** prove: the answer times come from the player's device. A careful script that
+  plays at human speed with human-looking variation would pass. Treat the boards as "checked", not
+  "cheat-proof"; the report button and the admin page are the backstop.
 - Daily questions come from a server secret (not the date), so they can't be worked out in advance.
 - Limits: 5 new players per network per hour (20 a day), 40 game starts per player per 10 minutes,
   one nickname change per 10 minutes, 16 KB per request. Nicknames are unique and cleaned of
@@ -61,8 +64,10 @@ check it under the project's Logs in the Vercel dashboard.
 ## Link previews
 
 Shared links show a picture on LinkedIn, X, WhatsApp, Slack and others:
-- `/s/<gameId>`: that game's verified score card (`api/share.js` writes the preview tags,
-  `api/og.js` draws the 1200×630 image from the game server's data, so it can't be faked).
+- `/s/<gameId>`: that game's score card (`api/share.js` writes the preview tags, `api/og.js` draws the
+  1200×630 image from the server's stored result, not from anything in the link). Opening the link
+  lands on `/?s=<id>`, which shows the score and a Play button.
+  The app only offers this link once the game is actually posted.
 - `/c/<code>`: a challenge invite ("Beat 3,416").
 - The home page uses the general game preview (`/api/og`).
 Social apps cache previews; to refresh one on LinkedIn, paste the link into
@@ -79,4 +84,34 @@ https://www.linkedin.com/post-inspector/.
 - **Error reports:** browsers send uncaught errors (max 5 per visit, rate-limited) to `client_errors`.
 - **Admin page:** `/admin`, unlocked with `app_secrets.admin_key`: totals, remove/restore/rename players, recent errors.
 - **Privacy:** `/privacy`. Players can delete themselves (Stats → Delete my player). Fonts are self-hosted.
-- **Visitor counts:** Vercel Web Analytics (cookie-free). Enable it in the Vercel dashboard.
+- **Usage counts:** the app sends event names only (`events` action); the server adds them up per day
+  in `events_daily`. The admin page shows the last 14 days as a funnel. No third-party analytics.
+- **Reports:** a flag button on leaderboard rows; open reports show on the admin page.
+
+## Rules versions
+
+Every game row stores `rules_version`. v1 is the original generator; v2 (current) balances the
+questions: about 60% are numbers where the rule changes the answer (2, 4, 7, 9), the rule switches
+about 45% of the time, left/right answers stay balanced, and Hard brings in words/dots from 25% of the
+game and swapped sides from 50%. A pause while a number is showing counts that question as missed
+(v1 replaced it with a spare question). Old games are always re-scored with the version they started
+with. The app sends `v` with each start; an app too old for a Daily or challenge gets HTTP 426 and reloads.
+
+## Saving scores
+
+A finished game is written to the device's outbox (`src/queue.js`) before it's sent. Connection
+failures, timeouts, 408, 429 and 5xx keep it queued with backoff (5 s doubling to 5 min) and it is
+retried on load, when the connection returns, when the app comes back to the front, and on a timer.
+`finish` is idempotent: sending a game the server already saved returns the saved result. Only a
+definite rejection (for example 422, failed verification) stops the retries; the game stays listed
+as needing attention.
+
+## Checks
+
+`npm test` runs the rules and outbox tests. `npm run check` also confirms the two copies of the rules
+(`pwa/src/core.js` and `supabase/functions/api/core.js`) are identical; CI runs both.
+
+## The claude.ai version
+
+`../index.html` is the original prototype published as a claude.ai artifact. It is a separate,
+frozen target with its own storage and no server checks; it shows a banner pointing to this site.

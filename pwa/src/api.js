@@ -1,4 +1,4 @@
-import { API_URL, PUBLISHABLE_KEY } from './config.js';
+import { API_URL, PUBLISHABLE_KEY } from './config.js?v=11';
 
 const TOKEN_KEY = 'lor.playerToken';
 
@@ -29,7 +29,7 @@ export async function api(action, body = {}, { timeout = 12000 } = {}) {
       signal: ctrl.signal,
     });
   } catch {
-    throw new ApiError(0, 'You’re offline.');
+    throw new ApiError(0, ctrl.signal.aborted ? 'The server took too long to answer.' : 'You’re offline.');
   } finally {
     clearTimeout(timer);
   }
@@ -39,17 +39,14 @@ export async function api(action, body = {}, { timeout = 12000 } = {}) {
   return data;
 }
 
-// Finished games that couldn't be sent (no signal at the end of a game) wait here and are retried.
-export const pending = {
-  list: () => store.get('pending', []),
-  add(item) { store.set('pending', [...pending.list().filter(p => p.gameId !== item.gameId), item]); },
-  remove(gameId) { store.set('pending', pending.list().filter(p => p.gameId !== gameId)); },
-  async flush() {
-    const sent = [];
-    for (const p of pending.list()) {
-      try { const r = await api('finish', { gameId: p.gameId, events: p.events, ended: p.ended }); pending.remove(p.gameId); sent.push({ ...p, result: r }); }
-      catch (e) { if (e.offline) break; pending.remove(p.gameId); }   // a rejected or duplicate game won't succeed later
-    }
-    return sent;
-  },
-};
+// Finished games wait in a durable outbox until the server has them (see queue.js).
+import { createOutbox } from './queue.js?v=11';
+export const outbox = createOutbox({
+  storage: store,
+  send: item => api('finish', { gameId: item.gameId, events: item.events, ended: item.ended }, { timeout: 15000 }),
+});
+// Games queued by older versions of the app.
+try {
+  const old = store.get('pending', null);
+  if (Array.isArray(old) && old.length) { for (const p of old) if (!outbox.get(p.gameId)) outbox.add(p); store.set('pending', null); }
+} catch {}

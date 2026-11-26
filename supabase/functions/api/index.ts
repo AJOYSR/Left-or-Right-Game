@@ -4,7 +4,7 @@
 import { createClient } from 'npm:@supabase/supabase-js@2.45.4';
 import webpush from 'npm:web-push@3.6.7';
 import {
-  Run, ROUND_OPTIONS, DAILY_ROUNDS, MAX_PER_ROUND, MIN_MS, newSeed, challengeCode, parseCode,
+  Run, ROUND_OPTIONS, DAILY_ROUNDS, MAX_PER_ROUND, MIN_MS, RULES_VERSION, newSeed, challengeCode, parseCode,
   minimumDurationMs, timingCheck, cleanNickname, streakInfo, dayNumber, addDays,
 } from './core.js';
 
@@ -18,7 +18,8 @@ const LIMITS = {
   registerPerIpHour: 5, registerPerIpDay: 20,   // new players from one network
   startsPer10Min: 40,                           // a real game takes 30 s or more
   renameEveryMs: 10 * 60 * 1000,
-  classicMaxAgeMs: 6 * 60 * 60 * 1000,          // a Classic game must be submitted within 6 hours
+  classicMaxAgeMs: 48 * 60 * 60 * 1000,         // a Classic game played offline can be posted for 2 days
+  reportsPerDay: 10,
   errorsPerIpHour: 30,                          // error reports from one network
 };
 const ALLOWED_ORIGINS = [
@@ -109,13 +110,79 @@ async function vapid() {
   return { pub: await secret('vapid_public'), priv: await secret('vapid_private') };
 }
 
+// Leaderboards are read far more often than they change: keep each one for a few seconds.
+const boardCache = new Map<string, { t: number; rows: any[] }>();
+const BOARD_TTL_MS = 15000;
 const rowOut = (r: any) => ({ playerId: r.player_id, nickname: r.nickname, score: r.score, correct: r.correct, avgMs: r.avg_ms });
-async function board(kind: 'classic' | 'week' | 'daily' | 'challenge', p: any) {
+async function board(kind: 'classic' | 'week' | 'daily' | 'challenge', p: any, fresh = false) {
+  const key = kind === 'daily' ? 'd:' + p.day : kind === 'challenge' ? 'c:' + p.code : `${kind}:${p.rounds}:${!!p.hard}`;
+  const hit = boardCache.get(key);
+  if (!fresh && hit && Date.now() - hit.t < BOARD_TTL_MS) return hit.rows;
   const { data, error } = kind === 'daily' ? await db.rpc('board_daily', { p_day: p.day })
     : kind === 'challenge' ? await db.rpc('board_challenge', { p_code: p.code })
     : await db.rpc('board_classic', { p_rounds: p.rounds, p_hard: !!p.hard, p_since: kind === 'week' ? weekStartIso() : null });
   if (error) fail(500, 'Could not load the leaderboard.');
-  return (data || []).map(rowOut);
+  const rows = (data || []).map(rowOut);
+  if (boardCache.size > 500) boardCache.clear();
+  boardCache.set(key, { t: Date.now(), rows });
+  return rows;
+}
+const forgetBoards = () => boardCache.clear();
+
+// Where this run placed, out of how many, and (for Classic, best score per player) where the
+// player's best run sits.
+async function placement(game: any) {
+  const { data } = await db.rpc('run_placement', { p_game: game.id });
+  const p = (data || [])[0] || null;
+  let bestRank = null;
+  if (game.mode === 'classic') {
+    const list = await board('classic', { rounds: game.rounds, hard: game.hard }, true);
+    const idx = list.findIndex((r: any) => r.playerId === game.player_id);
+    bestRank = idx >= 0 ? idx + 1 : null;
+  }
+  return { place: p?.place ?? null, of: p?.total ?? null, bestRank };
+}
+const resultOf = (g: any) => ({
+  score: g.score, correct: g.correct, rounds: g.rounds, avgMs: g.avg_ms, bestStreak: g.best_streak, skips: g.pauses,
+  swMs: g.sw_ms, repMs: g.rep_ms, split: { parity: [g.par_right, g.par_total], size: [g.size_right, g.size_total] },
+});
+
+// Product counts (no user ids): what the app reports, plus a few the server knows for certain.
+const EVENT_NAMES = new Set(['visit', 'practice_start', 'practice_done', 'practice_skip', 'play_start', 'game_finish',
+  'finish_saved_local', 'finish_retry', 'finish_failed', 'daily_open', 'challenge_open', 'challenge_start',
+  'share_open', 'share_done', 'install', 'reminder_on', 'name_saved', 'review_open', 'report', 'restart_fail',
+  'landing_score', 'untimed_start']);
+const bump = (names: string[]) => db.rpc('bump_events', { p_names: names }).then(() => {}, () => {});
+
+// The Daily runs on UTC days. Allow the previous day for a few minutes after midnight, for a
+// player who opened it just before.
+const openDailyDays = () => {
+  const ms = Date.now() % 864e5;
+  return ms < 10 * 60000 ? [utcDay(0), utcDay(-1)] : [utcDay(0)];
+};
+// Which question rules a run uses. The app says which it knows; an out-of-date app is told to reload.
+const dailyVersion = (day: string) => (day <= '2026-11-26' ? 1 : 2);
+const needVersion = (v: number, b: any) => { if (v > 1 && Number(b.v) < v) fail(426, 'A new version of the game is ready. Reload the page to play.'); };
+
+// Push services we deliver to. Anything else is refused, so the server can't be used to call other sites.
+const PUSH_HOSTS = [/^fcm\.googleapis\.com$/, /^updates\.push\.services\.mozilla\.com$/, /(^|\.)push\.apple\.com$/,
+  /\.notify\.windows\.com$/, /^web\.push\.apple\.com$/, /^android\.googleapis\.com$/];
+const pushHostOk = (endpoint: string) => { try { const u = new URL(endpoint); return u.protocol === 'https:' && PUSH_HOSTS.some(r => r.test(u.hostname)); } catch { return false; } };
+const validTz = (tz: unknown) => { if (typeof tz !== 'string' || !tz || tz.length > 64) return null; try { new Intl.DateTimeFormat('en', { timeZone: tz }); return tz; } catch { return null; } };
+function localNow(tz: string | null, offsetMin: number) {
+  if (tz) {
+    const parts = Object.fromEntries(new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', hourCycle: 'h23' })
+      .formatToParts(new Date()).map(x => [x.type, x.value]));
+    return { day: `${parts.year}-${parts.month}-${parts.day}`, hour: Number(parts.hour) % 24 };
+  }
+  const local = new Date(Date.now() + offsetMin * 60000);
+  return { day: local.toISOString().slice(0, 10), hour: local.getUTCHours() };
+}
+function bestDailyStreak(days: string[]) {
+  const sorted = [...new Set(days)].sort();
+  let best = 0;
+  for (let i = 0; i < sorted.length; i++) best = Math.max(best, streakInfo(sorted.slice(0, i + 1), sorted[i]).streak);
+  return best;
 }
 
 async function startsRecently(playerId: string) {
@@ -171,42 +238,54 @@ const actions: Record<string, (req: Request, body: any) => Promise<unknown>> = {
     const mode = b.mode;
     if (mode === 'classic') {
       await startsRecently(me.id);
-      const row = { player_id: me.id, mode, seed: newSeed(cryptoRand), rounds: rounds(b.rounds), hard: b.hard === true };
+      const v = Number(b.v) >= RULES_VERSION ? RULES_VERSION : 1;
+      const row = { player_id: me.id, mode, seed: newSeed(cryptoRand), rounds: rounds(b.rounds), hard: b.hard === true, rules_version: v };
       const { data, error } = await db.from('games').insert(row).select('id, seed, rounds, hard').single();
       if (error) fail(500, 'Could not start the game.');
-      return { gameId: data!.id, seed: data!.seed, rounds: data!.rounds, hard: data!.hard, mode };
+      bump(['srv_start_classic']);
+      return { gameId: data!.id, seed: data!.seed, rounds: data!.rounds, hard: data!.hard, mode, v };
     }
     if (mode === 'daily') {
-      const day = String(b.day || '');
-      // the player's local date may be a day either side of UTC
-      if (!DAY.test(day) || ![utcDay(-1), utcDay(0), utcDay(1)].includes(day)) fail(400, 'That Daily isn’t open.');
-      const existing = async () => (await db.from('games').select('id, seed, status').eq('player_id', me.id).eq('mode', 'daily').eq('day', day).maybeSingle()).data;
+      // one Daily a day for everyone, on UTC days; the app asks for today's unless it was opened just before midnight
+      const open = openDailyDays();
+      const day = DAY.test(String(b.day || '')) && open.includes(String(b.day)) ? String(b.day) : open[0];
+      const existing = async () => (await db.from('games').select('id, seed, status, rules_version').eq('player_id', me.id).eq('mode', 'daily').eq('day', day).maybeSingle()).data;
       let g = await existing();
       if (!g) {
-        const { error } = await db.from('games').insert({ player_id: me.id, mode, seed: await dailySeed(day), rounds: DAILY_ROUNDS, hard: false, day });
+        const v = dailyVersion(day);
+        needVersion(v, b);
+        const { error } = await db.from('games').insert({ player_id: me.id, mode, seed: await dailySeed(day), rounds: DAILY_ROUNDS, hard: false, day, rules_version: v });
         if (error && !isUnique(error)) fail(500, 'Could not start the Daily.');   // a double tap simply finds the first one
         g = await existing();
         if (!g) fail(500, 'Could not start the Daily.');
-        return { gameId: g!.id, seed: g!.seed, rounds: DAILY_ROUNDS, hard: false, mode, day };
+        bump(['srv_start_daily']);
+        return { gameId: g!.id, seed: g!.seed, rounds: DAILY_ROUNDS, hard: false, mode, day, v: g!.rules_version };
       }
       if (g.status !== 'open') fail(409, 'You’ve already played today’s challenge.');
-      return { gameId: g.id, seed: g.seed, rounds: DAILY_ROUNDS, hard: false, mode, day, resumed: true };
+      needVersion(g.rules_version, b);
+      return { gameId: g.id, seed: g.seed, rounds: DAILY_ROUNDS, hard: false, mode, day, v: g.rules_version, resumed: true };
     }
     if (mode === 'challenge') {
       const c = parseCode(b.code);
       if (!c) fail(400, 'That challenge link isn’t valid.');
-      const existing = async () => (await db.from('games').select('id, status').eq('player_id', me.id).eq('mode', 'challenge').eq('code', c!.code).maybeSingle()).data;
+      const existing = async () => (await db.from('games').select('id, status, rules_version').eq('player_id', me.id).eq('mode', 'challenge').eq('code', c!.code).maybeSingle()).data;
       let g = await existing();
       if (g && g.status !== 'open') fail(409, 'You’ve already played this challenge.');
-      if (g) return { gameId: g.id, seed: c!.seed, rounds: c!.rounds, hard: c!.hard, mode, code: c!.code, resumed: true };
+      if (g) { needVersion(g.rules_version, b); return { gameId: g.id, seed: c!.seed, rounds: c!.rounds, hard: c!.hard, mode, code: c!.code, v: g.rules_version, resumed: true }; }
       await startsRecently(me.id);
-      // a challenge link works even if its creator never posted it (shared from an offline game)
-      await db.from('challenges').upsert({ code: c!.code, seed: c!.seed, rounds: c!.rounds, hard: c!.hard, created_by: me.id }, { onConflict: 'code', ignoreDuplicates: true });
-      const { error } = await db.from('games').insert({ player_id: me.id, mode, seed: c!.seed, rounds: c!.rounds, hard: c!.hard, code: c!.code });
+      // a challenge link works even if its creator never posted it (shared from an offline game);
+      // its rules version is whatever the first player to open it used
+      const fresh = Number(b.v) >= RULES_VERSION ? RULES_VERSION : 1;
+      await db.from('challenges').upsert({ code: c!.code, seed: c!.seed, rounds: c!.rounds, hard: c!.hard, created_by: me.id, rules_version: fresh }, { onConflict: 'code', ignoreDuplicates: true });
+      const { data: ch } = await db.from('challenges').select('rules_version').eq('code', c!.code).maybeSingle();
+      const v = ch?.rules_version ?? fresh;
+      needVersion(v, b);
+      const { error } = await db.from('games').insert({ player_id: me.id, mode, seed: c!.seed, rounds: c!.rounds, hard: c!.hard, code: c!.code, rules_version: v });
       if (error && !isUnique(error)) fail(500, 'Could not start the challenge.');
       g = await existing();
       if (!g) fail(500, 'Could not start the challenge.');
-      return { gameId: g!.id, seed: c!.seed, rounds: c!.rounds, hard: c!.hard, mode, code: c!.code };
+      bump(['srv_start_challenge']);
+      return { gameId: g!.id, seed: c!.seed, rounds: c!.rounds, hard: c!.hard, mode, code: c!.code, v };
     }
     return fail(400, 'Unknown mode.');
   },
@@ -216,16 +295,19 @@ const actions: Record<string, (req: Request, body: any) => Promise<unknown>> = {
     const id = gameId(b.gameId);
     const { data: game } = await db.from('games').select('*').eq('id', id).eq('player_id', me.id).maybeSingle();
     if (!game) fail(404, 'Game not found.');
-    if (game!.status !== 'open') fail(409, 'This game was already submitted.');
+    // Sending the same game again (the answer to the first try was lost) gets the saved result back.
+    if (game!.status === 'finished') return { ...resultOf(game), ...(await placement(game)), already: true };
+    if (game!.status === 'rejected') fail(422, 'This game couldn’t be verified, so it wasn’t posted.');
     const events = b.events;
     const reject = async (reason: string) => {
       await db.from('games').update({ status: 'rejected', reject_reason: reason.slice(0, 200), finished_at: new Date().toISOString() }).eq('id', id).eq('status', 'open');
+      bump(['srv_reject']);
       return fail(422, 'This game couldn’t be verified, so it wasn’t posted.');
     };
     let run: any;
     try {
       // Daily and challenges are one try: ending early still counts with the rounds played.
-      run = Run.replay({ seed: game!.seed, rounds: game!.rounds, hard: game!.hard }, events, { allowUnfinished: game!.mode !== 'classic' && b.ended === true });
+      run = Run.replay({ seed: game!.seed, rounds: game!.rounds, hard: game!.hard, version: game!.rules_version }, events, { allowUnfinished: game!.mode !== 'classic' && b.ended === true });
     } catch (e) { return reject('replay: ' + (e as Error).message); }
     const elapsed = Date.now() - new Date(game!.started_at).getTime();
     if (elapsed + 2000 < minimumDurationMs(events)) return reject('faster than the clock');
@@ -240,14 +322,17 @@ const actions: Record<string, (req: Request, body: any) => Promise<unknown>> = {
       par_right: s.split.parity[0], par_total: s.split.parity[1], size_right: s.split.size[0], size_total: s.split.size[1],
     };
     // only the first submit of a game counts, even if two arrive at once
-    const { data: done, error } = await db.from('games').update(update).eq('id', id).eq('status', 'open').select('id');
+    const { data: done, error } = await db.from('games').update(update).eq('id', id).eq('status', 'open').select('*');
     if (error) fail(500, 'Could not save the game. Try again.');
-    if (!done || !done.length) fail(409, 'This game was already submitted.');
-    const list = game!.mode === 'daily' ? await board('daily', { day: game!.day })
-      : game!.mode === 'challenge' ? await board('challenge', { code: game!.code })
-      : await board('classic', { rounds: game!.rounds, hard: game!.hard });
-    const idx = list.findIndex((r: any) => r.playerId === me.id);
-    return { ...s, rank: idx >= 0 ? idx + 1 : null, of: list.length };
+    if (!done || !done.length) {
+      // a second copy of this submit won the race: return what it saved
+      const { data: again } = await db.from('games').select('*').eq('id', id).maybeSingle();
+      if (again?.status === 'finished') return { ...resultOf(again), ...(await placement(again)), already: true };
+      fail(409, 'This game was already submitted.');
+    }
+    forgetBoards();
+    bump(['srv_finish']);
+    return { ...s, ...(await placement(done[0])) };
   },
 
   async challengeCreate(req, b) {
@@ -255,7 +340,7 @@ const actions: Record<string, (req: Request, body: any) => Promise<unknown>> = {
     const { data: game } = await db.from('games').select('*').eq('id', gameId(b.gameId)).eq('player_id', me.id).maybeSingle();
     if (!game || game.mode !== 'classic' || game.status !== 'finished') fail(400, 'Finish a Classic game first.');
     const code = challengeCode(game!.seed, game!.rounds, game!.hard);
-    await db.from('challenges').upsert({ code, seed: game!.seed, rounds: game!.rounds, hard: game!.hard, created_by: me.id }, { onConflict: 'code', ignoreDuplicates: true });
+    await db.from('challenges').upsert({ code, seed: game!.seed, rounds: game!.rounds, hard: game!.hard, created_by: me.id, rules_version: game!.rules_version }, { onConflict: 'code', ignoreDuplicates: true });
     // the creator's own run counts as their one try on this challenge
     const { data: mine } = await db.from('games').select('id').eq('player_id', me.id).eq('mode', 'challenge').eq('code', code).maybeSingle();
     if (!mine) {
@@ -269,9 +354,9 @@ const actions: Record<string, (req: Request, body: any) => Promise<unknown>> = {
   async challengeInfo(_req, b) {
     const c = parseCode(b.code);
     if (!c) fail(400, 'That challenge link isn’t valid.');
-    const { data } = await db.from('challenges').select('created_by, players(nickname)').eq('code', c!.code).maybeSingle();
+    const { data } = await db.from('challenges').select('created_by, rules_version, players(nickname)').eq('code', c!.code).maybeSingle();
     return {
-      ...c, createdBy: data ? { playerId: data.created_by, nickname: (data as any).players?.nickname || null } : null,
+      ...c, v: data?.rules_version ?? null, createdBy: data ? { playerId: data.created_by, nickname: (data as any).players?.nickname || null } : null,
       board: await board('challenge', { code: c!.code }),
     };
   },
@@ -280,29 +365,47 @@ const actions: Record<string, (req: Request, body: any) => Promise<unknown>> = {
   async share(_req, b) {
     const id = gameId(b.gameId);
     const { data: g } = await db.from('games')
-      .select('mode, rounds, hard, day, code, score, correct, avg_ms, best_streak, player_id, players(nickname)')
+      .select('id, mode, rounds, hard, day, code, score, correct, avg_ms, best_streak, player_id, players(nickname, banned)')
       .eq('id', id).eq('status', 'finished').maybeSingle();
-    if (!g) fail(404, 'Game not found.');
-    const list = g!.mode === 'daily' ? await board('daily', { day: g!.day })
-      : g!.mode === 'challenge' ? await board('challenge', { code: g!.code })
-      : await board('classic', { rounds: g!.rounds, hard: g!.hard });
-    const idx = list.findIndex((r: any) => r.playerId === g!.player_id);
+    if (!g || (g as any).players?.banned) fail(404, 'Game not found.');
+    const pl = await placement(g);
     return {
       mode: g!.mode, rounds: g!.rounds, hard: g!.hard, day: g!.day, code: g!.code, score: g!.score, correct: g!.correct,
       avgMs: g!.avg_ms, bestStreak: g!.best_streak, nickname: (g as any).players?.nickname || 'A player',
-      rank: idx >= 0 ? idx + 1 : null, of: list.length,
+      rank: pl.place, of: pl.of,
     };
   },
 
   async boards(_req, b) {
     const r = rounds(b.rounds);
-    const day = typeof b.day === 'string' && DAY.test(b.day) ? b.day : null;
+    const day = typeof b.day === 'string' && DAY.test(b.day) ? b.day : utcDay(0);
     const [all, week, daily] = await Promise.all([
       board('classic', { rounds: r, hard: b.hard === true }),
       board('week', { rounds: r, hard: b.hard === true }),
       day ? board('daily', { day }) : Promise.resolve([]),
     ]);
     return { all, week, daily };
+  },
+
+  // ---------- product counts and reports ----------
+  async events(req, b) {
+    const names = Array.isArray(b.names) ? b.names.filter((n: unknown) => typeof n === 'string' && EVENT_NAMES.has(n)).slice(0, 20) : [];
+    if (names.length) await bump(names);
+    return { ok: true };
+  },
+
+  async report(req, b) {
+    const me = await player(req);
+    const target = gameId(b.playerId);
+    if (target === me.id) fail(400, 'You can’t report yourself.');
+    const reason = ['name', 'score', 'other'].includes(b.reason) ? b.reason : fail(400, 'Pick a reason.');
+    const { count } = await db.from('reports').select('id', { count: 'exact', head: true }).eq('reporter_id', me.id).gte('created_at', since(864e5));
+    if ((count || 0) >= LIMITS.reportsPerDay) fail(429, 'You’ve sent a lot of reports today. Thanks, we’ll look at them.');
+    const note = typeof b.note === 'string' ? b.note.trim().slice(0, 200) || null : null;
+    const { error } = await db.from('reports').insert({ reporter_id: me.id, target_id: target, reason, note });
+    if (error && !isUnique(error)) fail(error.code === '23503' ? 404 : 500, 'Could not send the report.');
+    bump(['report']);
+    return { ok: true };
   },
 
   // ---------- error reports from browsers ----------
@@ -326,12 +429,13 @@ const actions: Record<string, (req: Request, body: any) => Promise<unknown>> = {
     const me = await player(req);
     const sub = b.subscription || {};
     const endpoint = String(sub.endpoint || ''), p256dh = String(sub.keys?.p256dh || ''), auth = String(sub.keys?.auth || '');
-    if (!/^https:\/\//.test(endpoint) || endpoint.length > 1000 || !p256dh || p256dh.length > 200 || !auth || auth.length > 100) fail(400, 'Bad subscription.');
+    if (!pushHostOk(endpoint) || endpoint.length > 1000 || !p256dh || p256dh.length > 200 || !auth || auth.length > 100) fail(400, 'Bad subscription.');
     const tz = Math.max(-840, Math.min(840, Math.round(Number(b.tzOffsetMin) || 0)));
+    const tzName = validTz(b.tz);
     const hour = Number.isInteger(b.hour) && b.hour >= 0 && b.hour <= 23 ? b.hour : 18;
     const { count } = await db.from('push_subscriptions').select('id', { count: 'exact', head: true }).eq('player_id', me.id);
     if ((count || 0) >= 5) await db.from('push_subscriptions').delete().eq('player_id', me.id);   // keep the newest devices only
-    const { error } = await db.from('push_subscriptions').upsert({ player_id: me.id, endpoint, p256dh, auth, tz_offset_min: tz, remind_hour: hour }, { onConflict: 'endpoint' });
+    const { error } = await db.from('push_subscriptions').upsert({ player_id: me.id, endpoint, p256dh, auth, tz_offset_min: tz, tz: tzName, remind_hour: hour, fail_count: 0 }, { onConflict: 'endpoint' });
     if (error) fail(500, 'Could not turn on reminders.');
     return { ok: true, hour };
   },
@@ -349,28 +453,41 @@ const actions: Record<string, (req: Request, body: any) => Promise<unknown>> = {
     const keys = await vapid();
     webpush.setVapidDetails('https://left-or-right-peach.vercel.app', keys.pub, keys.priv);
     const { data: subs } = await db.from('push_subscriptions').select('*').limit(5000);
-    let sent = 0, removed = 0, skipped = 0;
+    let sent = 0, removed = 0, skipped = 0, failed = 0;
+    const today = utcDay(0);   // the Daily is on UTC days
+    const send = (sub: any, payload: string) => webpush.sendNotification({ endpoint: sub.endpoint, keys: { p256dh: sub.p256dh, auth: sub.auth } }, payload, { TTL: 6 * 3600 });
     for (const s of subs || []) {
-      const local = new Date(Date.now() + s.tz_offset_min * 60000);
-      const day = local.toISOString().slice(0, 10);
-      if (local.getUTCHours() !== s.remind_hour || s.last_sent_day === day) { skipped++; continue; }
-      const { data: played } = await db.from('games').select('day').eq('player_id', s.player_id).eq('mode', 'daily').eq('status', 'finished').gte('day', addDays(day, -90));
+      const local = localNow(s.tz, s.tz_offset_min);
+      // send in the reminder hour, or up to 3 hours later if an earlier try failed
+      if (local.hour < s.remind_hour || local.hour > s.remind_hour + 3 || s.last_sent_day === local.day) { skipped++; continue; }
+      if (!pushHostOk(s.endpoint)) { await db.from('push_subscriptions').delete().eq('id', s.id); removed++; continue; }
+      const { data: played } = await db.from('games').select('day').eq('player_id', s.player_id).eq('mode', 'daily').eq('status', 'finished').gte('day', addDays(today, -90));
       const days = (played || []).map(g => g.day);
-      await db.from('push_subscriptions').update({ last_sent_day: day }).eq('id', s.id);
-      if (days.includes(day)) { skipped++; continue; }
-      const st = streakInfo(days, day);
+      if (days.includes(today)) { await db.from('push_subscriptions').update({ last_sent_day: local.day }).eq('id', s.id); skipped++; continue; }
+      const st = streakInfo(days, today);
       const body = st.alive && st.streak > 0 ? `Keep your ${st.streak}-day streak going. Same 20 questions for everyone.` : 'Same 20 questions for everyone. One try.';
-      try {
-        await webpush.sendNotification({ endpoint: s.endpoint, keys: { p256dh: s.p256dh, auth: s.auth } },
-          JSON.stringify({ title: `Daily #${dayNumber(day)} is ready`, body, url: '/?go=daily' }), { TTL: 6 * 3600 });
-        sent++;
-      } catch (e) {
-        const code = (e as any)?.statusCode;
-        if (code === 404 || code === 410) { await db.from('push_subscriptions').delete().eq('id', s.id); removed++; }
-        else console.error('push failed', code);
+      const payload = JSON.stringify({ title: `Daily #${dayNumber(today)} is ready`, body, url: '/?view=daily' });
+      let ok = false;
+      for (let attempt = 0; attempt < 3 && !ok; attempt++) {
+        try { await send(s, payload); ok = true; }
+        catch (e) {
+          const code = (e as any)?.statusCode;
+          if (code === 404 || code === 410) { await db.from('push_subscriptions').delete().eq('id', s.id); removed++; break; }
+          const transient = !code || code === 429 || code >= 500;
+          if (!transient || attempt === 2) { console.error('push failed', code); break; }
+          await new Promise(r => setTimeout(r, 500 * (attempt + 1)));
+        }
+      }
+      if (ok) { sent++; await db.from('push_subscriptions').update({ last_sent_day: local.day, fail_count: 0 }).eq('id', s.id); }
+      else {
+        failed++;
+        // try again next hour; after repeated failures, stop
+        const fails = (s.fail_count || 0) + 1;
+        if (fails >= 6) { await db.from('push_subscriptions').delete().eq('id', s.id); removed++; }
+        else await db.from('push_subscriptions').update({ fail_count: fails }).eq('id', s.id);
       }
     }
-    return { sent, removed, skipped };
+    return { sent, removed, skipped, failed };
   },
 
   // ---------- admin page ----------
@@ -408,6 +525,22 @@ const actions: Record<string, (req: Request, body: any) => Promise<unknown>> = {
     if (error) fail(500, 'Could not rename the player.');
     return { ok: true };
   },
+  async adminReports(req) {
+    await admin(req);
+    const { data } = await db.from('reports').select('id, reason, note, created_at, target_id, target:players!reports_target_id_fkey(nickname, banned), reporter:players!reports_reporter_id_fkey(nickname)')
+      .eq('status', 'open').order('created_at', { ascending: false }).limit(100);
+    return { reports: (data || []).map((r: any) => ({ id: r.id, reason: r.reason, note: r.note, at: r.created_at, targetId: r.target_id, target: r.target?.nickname, targetBanned: r.target?.banned, reporter: r.reporter?.nickname || null })) };
+  },
+  async adminResolveReport(req, b) {
+    await admin(req);
+    await db.from('reports').update({ status: 'done' }).eq('id', gameId(b.reportId));
+    return { ok: true };
+  },
+  async adminFunnel(req) {
+    await admin(req);
+    const { data } = await db.from('events_daily').select('day, name, n').gte('day', utcDay(-13)).order('day');
+    return { events: data || [] };
+  },
   async adminErrors(req) {
     await admin(req);
     const { data } = await db.from('client_errors').select('at, message, stack, url, ua, player_id').order('at', { ascending: false }).limit(100);
@@ -424,7 +557,17 @@ const actions: Record<string, (req: Request, body: any) => Promise<unknown>> = {
       score: g.score, correct: g.correct, avgMs: g.avg_ms, swMs: g.sw_ms, repMs: g.rep_ms,
       par: [g.par_right, g.par_total], siz: [g.size_right, g.size_total],
     }));
-    return { games };
+    // Totals over every game ever, so levels and badges don't slip when old games drop off the list above.
+    const [{ data: lt }, { data: dd }] = await Promise.all([
+      db.rpc('player_lifetime', { p_player: me.id }),
+      db.from('games').select('day').eq('player_id', me.id).eq('mode', 'daily').eq('status', 'finished').limit(5000),
+    ]);
+    const l = (lt || [])[0];
+    const lifetime = l ? {
+      games: l.games, totalScore: Number(l.total_score), perfect: l.perfect, hardPerfect: l.hard_perfect, fastest: l.fastest_ms,
+      marathon: l.marathon, challenges: l.challenges, bestStreak: bestDailyStreak((dd || []).map((g: any) => g.day)),
+    } : null;
+    return { games, lifetime, today: utcDay(0) };
   },
 };
 

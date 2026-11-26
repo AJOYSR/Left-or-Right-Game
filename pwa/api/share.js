@@ -10,7 +10,7 @@ export default async function handler(request) {
   const { title, description } = texts(info);
   const self = info.kind === 'game' ? `${SITE}/s/${info.id}` : info.kind === 'challenge' ? `${SITE}/c/${info.code}` : SITE;
   const image = info.kind === 'game' ? `${SITE}/api/og?g=${info.id}` : info.kind === 'challenge' ? `${SITE}/api/og?c=${info.code}` : `${SITE}/api/og`;
-  const next = info.kind === 'challenge' ? `/#c-${info.code}` : '/?from=share';
+  const next = info.kind === 'challenge' ? `/#c-${info.code}` : info.kind === 'game' ? `/?s=${info.id}` : '/';
   const html = `<!doctype html>
 <html lang="en">
 <head>

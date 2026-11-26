@@ -7,7 +7,8 @@
     "dev": "python3 scripts/dev-server.py",
     "deploy": "npx vercel@latest --prod",
     "icons": "python3 scripts/make-icons.py",
-    "sync-server": "cp src/core.js ../supabase/functions/api/core.js"
+    "sync-server": "cp src/core.js ../supabase/functions/api/core.js",
+    "check": "cmp src/core.js ../supabase/functions/api/core.js && echo 'rules copies match' && node --test tests/"
   },
   "dependencies": {
     "@vercel/og": "0.11.1"

@@ -164,3 +164,84 @@ test('challenge codes and Daily numbers', () => {
   assert.equal(dayNumber('2026-11-26'), 1);
   assert.equal(dayNumber(addDays('2026-11-26', 40)), 41);
 });
+
+// ---------- rules v2 ----------
+import { RULES_VERSION, RULE_MATTERS, hardStage, mergeStats, statsFromGames, badgesFromStats, utcDayKey } from '../src/core.js';
+
+test('v2: same seed same questions, and different from v1', () => {
+  assert.equal(RULES_VERSION, 2);
+  assert.deepEqual(buildQuestions('abc234', 20, false, 2), buildQuestions('abc234', 20, false, 2));
+  assert.notDeepEqual(buildQuestions('abc234', 20, false, 2), buildQuestions('abc234', 20, false, 1));
+});
+
+test('v2: most prompts are ones where the rule changes the answer; switches and sides are balanced', () => {
+  let matters = 0, switches = 0, pairs = 0, total = 0;
+  for (let k = 0; k < 300; k++) {
+    const qs = buildQuestions('seed' + k, 20, false, 2);
+    let left = 0;
+    qs.forEach((q, i) => {
+      total++; if (RULE_MATTERS.includes(q.n)) matters++;
+      if (i) { pairs++; if (q.type !== qs[i - 1].type) switches++; assert.ok(!(q.type === qs[i - 1].type && q.n === qs[i - 1].n)); }
+      if (sideFor(q) === 'left') left++;
+      assert.ok(NUMBERS.includes(q.n));
+    });
+    assert.ok(Math.abs(left - (20 - left)) <= 4, `sides ${left}/${20 - left}`);
+  }
+  assert.ok(matters / total > 0.55 && matters / total < 0.65, `rule matters ${matters / total}`);
+  assert.ok(switches / pairs > 0.4 && switches / pairs < 0.5, `switch rate ${switches / pairs}`);
+});
+
+test('v2 Hard: words and dots only from a quarter in, swaps only from halfway', () => {
+  for (let k = 0; k < 50; k++) {
+    const qs = buildQuestions('h' + k, 20, true, 2);
+    qs.forEach((q, i) => {
+      const st = hardStage(i, 20);
+      if (!st.forms) assert.equal(q.form, 'digit');
+      if (!st.flips) assert.equal(q.flip, false);
+    });
+  }
+  assert.ok(buildQuestions('n', 20, false, 2).every(q => !q.flip && q.form === 'digit' && q.limit === BASE_LIMIT));
+});
+
+test('v2: a pause mid-question counts it as missed; the questions stay the same for everyone', () => {
+  const cfg = { seed: 'pz1234', rounds: 15, hard: false, version: 2 };
+  const a = new Run(cfg); const qa = [];
+  while (!a.done) { const q = a.next(); qa.push(q.n + q.type); if (a.round === 3 || a.round === 7) a.skip(); else a.answer(sideFor(q), 600); }
+  const b = new Run(cfg); const qb = [];
+  while (!b.done) { const q = b.next(); qb.push(q.n + q.type); b.answer(sideFor(q), 600); }
+  assert.deepEqual(qa, qb);
+  assert.equal(a.correct, 13); assert.equal(a.skips, 2);
+  assert.ok(a.events.length === 15 && a.events.filter(e => e.p === 1).length === 2);
+  const r = Run.replay(cfg, a.events);
+  assert.equal(r.score, a.score); assert.equal(r.skips, 2);
+});
+
+test('v2 replay rejects v1-style skips and fake pause flags', () => {
+  const cfg = { seed: 'pz1234', rounds: 15, hard: false, version: 2 };
+  const good = play(new Run(cfg), perfect).events;
+  assert.throws(() => Run.replay(cfg, [{ o: 's', s: 'main' }, ...good]));
+  assert.throws(() => Run.replay(cfg, good.map((e, i) => (i === 0 ? { ...e, p: 1 } : e))));   // pause flag with an answer
+  assert.throws(() => Run.replay(cfg, [...good, good[0]]));
+  assert.equal(Run.replay(cfg, good).correct, 15);
+});
+
+test('the answer log has what the review screen needs', () => {
+  const run = play(new Run({ seed: 'log123', rounds: 15, hard: false, version: 2 }), perfect);
+  const l = run.log[0];
+  for (const k of ['type', 'n', 'flip', 'd', 'right', 'ms', 'ok']) assert.ok(k in l, k);
+  const s = run.summary();
+  assert.equal(s.swN + s.repN, 14);
+});
+
+test('lifetime stats never go backwards when merged', () => {
+  const server = { games: 200, totalScore: 400000, perfect: 3, fastest: 480, bestStreak: 9 };
+  const local = statsFromGames([{ mode: 'classic', rounds: 15, correct: 15, score: 3000, avgMs: 450 }]);
+  const m = mergeStats(server, local);
+  assert.equal(m.games, 200); assert.equal(m.perfect, 3); assert.equal(m.fastest, 450); assert.equal(m.bestStreak, 9);
+  assert.ok(badgesFromStats(m).find(b => b.id === 'speed').earned);
+  assert.equal(mergeStats(null, local), local);
+});
+
+test('UTC day key', () => {
+  assert.equal(utcDayKey(new Date(Date.UTC(2026, 10, 26, 23, 30))), '2026-11-26');
+});

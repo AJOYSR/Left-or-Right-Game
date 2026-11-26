@@ -4,7 +4,8 @@
 export const ROUND_OPTIONS = [15, 20, 30, 50];
 export const BASE_LIMIT = 3000;      // ms per answer
 export const HARD_END_LIMIT = 1500;  // Hard mode shrinks the timer to this by the last round
-export const MAX_PAUSES = 3;         // per game
+export const MAX_PAUSES = 3;         // per game, rules v1 only (v2 pauses are unlimited and cost the question)
+export const RULES_VERSION = 2;      // bump when the question generator or scoring changes
 export const MIN_MS = 150;           // faster than any real read-and-decide: a guess
 export const LATE_GRACE_MS = 250;    // network/timer jitter allowed past the limit
 export const MAX_PER_ROUND = 250;    // 100 + 100 speed + 50 streak
@@ -64,10 +65,46 @@ export function makeQuestion(rng, i, total, hard, prev) {
   }
   return q;
 }
-export function buildQuestions(seed, total, hard) {
+export function buildQuestions(seed, total, hard, version = 1) {
+  if (version >= 2) return buildQuestionsV2(seed, total, hard);
   const rng = rngFrom(`${seed}:${hard ? 'h' : 'n'}:${total}`);
   const list = [];
   for (let i = 0; i < total; i++) list.push(makeQuestion(rng, i, total, hard, list[i - 1]));
+  return list;
+}
+
+// Rules v2. 1, 3, 6 and 8 give the same side under both rules (1 is odd AND low), so a game full
+// of them never tests the switch. v2 makes about 60% of prompts ones where the rule matters
+// (2, 4, 7, 9), switches the rule about 45% of the time, keeps left and right answers balanced,
+// never repeats a prompt back to back, and on Hard brings in new mechanics in stages:
+// words and dots from a quarter of the way in, swapped sides from halfway.
+export const RULE_MATTERS = [2, 4, 7, 9];
+export const RULE_SAME = [1, 3, 6, 8];
+export const SWITCH_RATE = 0.45;
+export const HARD_FORMS_FROM = 0.25, HARD_FLIPS_FROM = 0.5;
+export const hardStage = (i, total) => ({ forms: i >= Math.ceil(total * HARD_FORMS_FROM), flips: i >= Math.ceil(total * HARD_FLIPS_FROM) });
+function buildQuestionsV2(seed, total, hard) {
+  const rng = rngFrom(`${seed}:${hard ? 'h' : 'n'}:${total}:v2`);
+  const list = [];
+  let left = 0, right = 0;
+  for (let i = 0; i < total; i++) {
+    const prev = list[i - 1];
+    const type = !prev ? (rng() < 0.5 ? 'parity' : 'size')
+      : rng() < SWITCH_RATE ? (prev.type === 'parity' ? 'size' : 'parity') : prev.type;
+    const stage = hard ? hardStage(i, total) : { forms: false, flips: false };
+    const flip = stage.flips && rng() < 0.3;
+    const want = left - right >= 2 ? 'right' : right - left >= 2 ? 'left' : rng() < 0.5 ? 'left' : 'right';
+    const pool = rng() < 0.6 ? RULE_MATTERS : RULE_SAME;
+    const fits = n => sideFor({ type, n, flip }) === want && !(prev && prev.type === type && prev.n === n);
+    let cands = pool.filter(fits);
+    if (!cands.length) cands = NUMBERS.filter(fits);
+    const n = cands[(rng() * cands.length) | 0];
+    const f = rng();
+    const form = stage.forms ? (f < 0.2 ? 'word' : f < 0.35 ? 'dots' : 'digit') : 'digit';
+    const limit = hard ? Math.round(BASE_LIMIT - (BASE_LIMIT - HARD_END_LIMIT) * (total > 1 ? i / (total - 1) : 0)) : BASE_LIMIT;
+    if (want === 'left') left++; else right++;
+    list.push({ type, n, flip, form, limit });
+  }
   return list;
 }
 
@@ -77,11 +114,14 @@ const mean = a => (a.length ? a.reduce((x, y) => x + y, 0) / a.length : null);
 // Every question shown and what happened to it is an event:
 //   { o: 'a', d: 'left' | 'right' | null, ms, s: 'main' | 'spare' }  answered (d null = ran out of time)
 //   { o: 's', s }                                                     skipped by a pause mid-question
+// Rules v2 has no spare questions: a pause while a question is showing counts that question as
+// missed ({ o: 'a', d: null, ms: limit, p: 1 }), so everyone in a Daily or challenge sees the same
+// questions. Pauses between questions are free.
 // The server replays these events against the seed to compute the score itself.
 export class Run {
-  constructor({ seed, rounds, hard }) {
-    this.seed = seed; this.rounds = rounds; this.hard = !!hard;
-    this.qs = buildQuestions(seed, rounds, this.hard);
+  constructor({ seed, rounds, hard, version = 1 }) {
+    this.seed = seed; this.rounds = rounds; this.hard = !!hard; this.version = version;
+    this.qs = buildQuestions(seed, rounds, this.hard, version);
     this.spare = rngFrom(seed + ':spare');   // replacements for questions a pause interrupted
     this.events = [];
     this.round = 0; this.replace = false; this.prev = null; this.current = null;
@@ -102,19 +142,22 @@ export class Run {
     return q;
   }
 
-  answer(dir, ms) {
+  answer(dir, ms, { paused = false } = {}) {
     const q = this.current;
     if (!q) throw new Error('no question on screen');
     this.current = null;
     ms = Math.max(0, Math.round(ms));
+    if (paused) { dir = null; ms = q.limit; this.skips++; }
     this.round++;
-    this.events.push({ o: 'a', d: dir, ms, s: q.src });
+    const ev = { o: 'a', d: dir, ms, s: q.src };
+    if (paused) ev.p = 1;
+    this.events.push(ev);
     const right = sideFor(q);
     const early = !!dir && ms < MIN_MS;
     const late = ms > q.limit + LATE_GRACE_MS;
     const ok = dir === right && !early && !late;
     this.split[q.type][1]++;
-    this.log.push({ sw: q.sw, ms: dir ? ms : q.limit, ok, lim: q.limit });
+    this.log.push({ type: q.type, n: q.n, flip: q.flip, form: q.form, sw: q.sw, d: dir, right, ms: dir ? ms : q.limit, ok, lim: q.limit, early, late, paused });
     let pts = 0;
     if (ok) {
       this.correct++; this.streak++; this.bestStreak = Math.max(this.bestStreak, this.streak);
@@ -131,6 +174,7 @@ export class Run {
   skip() {
     const q = this.current;
     if (!q) throw new Error('no question on screen');
+    if (this.version >= 2) return this.answer(null, q.limit, { paused: true });
     if (this.skips >= MAX_PAUSES) throw new Error('no pauses left');
     this.current = null;
     this.skips++;
@@ -147,6 +191,7 @@ export class Run {
       score: this.score, correct: this.correct, rounds: this.rounds, played: this.round,
       avgMs: avg == null ? null : Math.round(avg), bestStreak: this.bestStreak, skips: this.skips,
       split: this.split, swMs: sw.length ? Math.round(mean(sw)) : null, repMs: rep.length ? Math.round(mean(rep)) : null,
+      swN: sw.length, repN: rep.length, version: this.version,
     };
   }
 
@@ -154,16 +199,18 @@ export class Run {
   // Throws if the events could not have come from a real game with this seed.
   static replay(cfg, events, { allowUnfinished = false } = {}) {
     const run = new Run(cfg);
-    if (!Array.isArray(events) || events.length > cfg.rounds + MAX_PAUSES) throw new Error('bad events');
+    const v2 = run.version >= 2;
+    if (!Array.isArray(events) || events.length > cfg.rounds + (v2 ? 0 : MAX_PAUSES)) throw new Error('bad events');
     for (const e of events) {
       if (run.done) throw new Error('events after the last round');
       const q = run.next();
       if (!e || e.s !== q.src) throw new Error('question order does not match');
-      if (e.o === 's') run.skip();
+      if (e.o === 's' && !v2) run.skip();
       else if (e.o === 'a') {
         if (!(e.d === 'left' || e.d === 'right' || e.d === null)) throw new Error('bad answer');
         if (!Number.isFinite(e.ms) || e.ms < 0 || e.ms > 600000) throw new Error('bad time');
-        run.answer(e.d, e.ms);
+        if (e.p !== undefined && !(v2 && e.p === 1 && e.d === null)) throw new Error('bad pause');
+        run.answer(e.d, e.ms, { paused: e.p === 1 });
       } else throw new Error('bad event');
     }
     if (!allowUnfinished && !run.done) throw new Error('game not finished');
@@ -197,7 +244,7 @@ export function timingCheck(events) {
 const RESERVED = ['admin', 'administrator', 'moderator', 'mod', 'system', 'support', 'staff', 'official', 'null', 'undefined', 'anonymous', 'player'];
 export function cleanNickname(raw) {
   const s = String(raw ?? '').normalize('NFKC')
-    .replace(/[\u0000-\u001f\u007f-\u009f­​-‏‪-‮⁠-⁯﻿]/g, '')
+    .replace(/[\u0000-\u001f\u007f-\u009f\u00ad\u200b-\u200f\u202a-\u202e\u2060-\u206f\ufeff]/g, '')
     .replace(/\s+/g, ' ').trim();
   if (s.length < 2 || s.length > 20) return { ok: false, error: 'Use 2 to 20 characters.' };
   if (!/^[\p{L}\p{N}][\p{L}\p{N} ._'-]*$/u.test(s)) return { ok: false, error: 'Use letters, numbers, spaces and . _ - \' only.' };
@@ -271,26 +318,43 @@ export const BADGES = [
   { id: 'streak30', name: 'Unstoppable', desc: 'A 30-day Daily streak', test: s => s.bestStreak >= 30 },
   { id: 'challenger', name: 'Challenger', desc: 'Play a friend’s challenge', test: s => s.challenges >= 1 },
 ];
-export function badgeState(games, today) {
+export const badgesFromStats = s => BADGES.map(b => ({ id: b.id, name: b.name, desc: b.desc, earned: !!b.test(s) }));
+// Combine lifetime totals from the server with what this device knows (games not posted yet).
+// Counts take the larger value, the fastest time the smaller, so nothing ever goes backwards.
+export function mergeStats(a, b) {
+  if (!a) return b; if (!b) return a;
+  const out = {};
+  for (const k of new Set([...Object.keys(a), ...Object.keys(b)])) {
+    const x = a[k], y = b[k];
+    if (k === 'fastest') out[k] = x == null ? y ?? null : y == null ? x : Math.min(x, y);
+    else out[k] = Math.max(Number(x) || 0, Number(y) || 0);
+  }
+  return out;
+}
+export function statsFromGames(games) {
   const full = games.filter(g => g.correct != null);
   const dailyDays = full.filter(g => g.mode === 'daily' && g.day).map(g => g.day).sort();
   let best = 0;
   for (let i = 0; i < dailyDays.length; i++) best = Math.max(best, streakInfo(dailyDays.slice(0, i + 1), dailyDays[i]).streak);
-  const s = {
+  return {
     games: full.length,
+    totalScore: full.reduce((t, g) => t + (g.score || 0), 0),
     perfect: full.filter(g => g.correct === g.rounds).length,
     hardPerfect: full.filter(g => g.hard && g.correct === g.rounds).length,
-    fastest: full.filter(g => g.avgMs && g.correct >= Math.min(15, g.rounds)).reduce((m, g) => (m === null || g.avgMs < m ? g.avgMs : m), null),
-    marathon: full.filter(g => g.rounds === 50 && g.correct != null).length,
+    fastest: full.filter(g => g.avgMs && g.correct >= g.rounds * 0.8).reduce((m, g) => (m === null || g.avgMs < m ? g.avgMs : m), null),
+    marathon: full.filter(g => g.rounds === 50).length,
     challenges: full.filter(g => g.mode === 'challenge').length,
     bestStreak: best,
   };
-  return BADGES.map(b => ({ id: b.id, name: b.name, desc: b.desc, earned: !!b.test(s) }));
 }
+export const badgeState = games => badgesFromStats(statsFromGames(games));
 
 // ---------- dates ----------
 const pad2 = n => String(n).padStart(2, '0');
 export const dayKey = (d = new Date()) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
 export const keyToDate = k => { const [y, m, d] = k.split('-').map(Number); return new Date(y, m - 1, d); };
 export const dayNumber = k => Math.round((keyToDate(k) - keyToDate(DAY_ONE)) / 864e5) + 1;
+// The Daily runs on UTC days, the same for everyone, matching the server.
+export const utcDayKey = (d = new Date()) => d.toISOString().slice(0, 10);
+export const msToNextUtcDay = (d = new Date()) => 864e5 - (d.getTime() % 864e5);
 export const addDays = (k, n) => { const d = keyToDate(k); d.setDate(d.getDate() + n); return dayKey(d); };

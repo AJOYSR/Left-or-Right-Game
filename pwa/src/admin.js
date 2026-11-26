@@ -1,7 +1,7 @@
 // Admin page: overview, remove or rename players, read error reports.
 // Every action is checked by the server against the admin key; this page holds no secrets itself.
-import { API_URL, PUBLISHABLE_KEY } from './config.js';
-import { cleanNickname } from './core.js';
+import { API_URL, PUBLISHABLE_KEY } from './config.js?v=11';
+import { cleanNickname } from './core.js?v=11';
 
 const $ = id => document.getElementById(id);
 const KEY = 'lor.adminKey';
@@ -77,7 +77,42 @@ async function loadErrors() {
   }));
 }
 
-async function refresh() { await Promise.all([loadSummary(), loadPlayers($('searchInput').value.trim()), loadErrors()]); }
+const REASONS = { name: 'Nickname', score: 'Score', other: 'Other' };
+async function loadReports() {
+  const { reports } = await call('adminReports');
+  $('repCount').textContent = reports.length ? `(${reports.length} open)` : '(none open)';
+  $('reports').replaceChildren(...reports.map(r => {
+    const tr = document.createElement('tr');
+    const who = document.createElement('span'); who.textContent = (r.target || '?') + (r.targetBanned ? ' (removed)' : '');
+    const why = document.createElement('span'); why.textContent = REASONS[r.reason] + (r.note ? `: ${r.note}` : '') + (r.reporter ? ` · from ${r.reporter}` : '');
+    const acts = document.createElement('span'); acts.className = 'adm-row';
+    const done = document.createElement('button'); done.className = 'ghost small'; done.type = 'button'; done.textContent = 'Done';
+    done.onclick = async () => { done.disabled = true; try { await call('adminResolveReport', { reportId: r.id }); await loadReports(); } catch (e) { alertRow(tr, e.message); } };
+    const find = document.createElement('button'); find.className = 'ghost small'; find.type = 'button'; find.textContent = 'Find player';
+    find.onclick = () => { $('searchInput').value = r.target || ''; loadPlayers(r.target || '').catch(() => {}); $('players').scrollIntoView({ behavior: 'smooth' }); };
+    acts.append(find, done);
+    tr.append(cell(who), cell(why), cell(when(r.at)), cell(acts));
+    return tr;
+  }));
+}
+
+// Funnel: one row per event, one column per day (newest first).
+const FUNNEL = [['visit', 'Visits'], ['practice_start', 'Practice started'], ['practice_done', 'Practice finished'], ['practice_skip', 'Practice skipped'],
+  ['srv_start_classic', 'Classic started'], ['srv_start_daily', 'Daily started'], ['srv_start_challenge', 'Challenge started'], ['srv_finish', 'Games posted'],
+  ['finish_retry', 'Post retried'], ['finish_failed', 'Post failed'], ['srv_reject', 'Rejected by checks'], ['restart_fail', 'Restart failed'],
+  ['challenge_open', 'Invite opened'], ['landing_score', 'Score link opened'], ['share_open', 'Share opened'], ['name_saved', 'Name saved'],
+  ['reminder_on', 'Reminders on'], ['install', 'Installed'], ['untimed_start', 'Untimed practice'], ['review_open', 'Answer review opened'], ['report', 'Reports']];
+async function loadFunnel() {
+  const { events } = await call('adminFunnel');
+  const days = [...new Set(events.map(e => e.day))].sort().reverse();
+  const n = (name, day) => events.find(e => e.name === name && e.day === day)?.n ?? 0;
+  const head = document.createElement('tr');
+  head.append(cell('Event'), ...days.map(d => cell(d.slice(5))));
+  const rows = FUNNEL.map(([k, label]) => { const tr = document.createElement('tr'); tr.append(cell(label), ...days.map(d => cell(String(n(k, d))))); return tr; });
+  $('funnel').replaceChildren(head, ...(days.length ? rows : [(() => { const tr = document.createElement('tr'); tr.append(cell('No events yet.')); return tr; })()]));
+}
+
+async function refresh() { await Promise.all([loadSummary(), loadPlayers($('searchInput').value.trim()), loadReports(), loadFunnel(), loadErrors()]); }
 
 async function open() {
   try {

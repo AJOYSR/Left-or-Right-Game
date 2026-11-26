@@ -1,11 +1,13 @@
+// Script addresses carry the release number (?v=11, set in index.html and the imports), so a
+// cache from an older release can never hand a new page an old script. Bump it on every release.
 // Offline support: the app shell is cached on install, so the game opens and Classic games
 // play with no connection. Game-server calls always go to the network.
-const VERSION = 'v10';
+const VERSION = 'v11';
 const SHELL = `lor-shell-${VERSION}`;
 const FONTS = 'lor-fonts';
 const FILES = [
-  '/', '/styles.css', '/manifest.webmanifest',
-  '/src/main.js', '/src/core.js', '/src/api.js', '/src/config.js', '/privacy', '/doc.css',
+  '/', '/styles.css?v=11', '/manifest.webmanifest',
+  '/src/main.js?v=11', '/src/core.js?v=11', '/src/api.js?v=11', '/src/queue.js?v=11', '/src/config.js?v=11', '/privacy', '/doc.css?v=11',
   '/fonts/fonts.css', '/fonts/inter-latin.woff2', '/fonts/inter-latin-ext.woff2', '/fonts/bricolage-grotesque-latin.woff2', '/fonts/bricolage-grotesque-latin-ext.woff2',
   '/icons/icon-192.png', '/icons/icon-512.png', '/icons/maskable-512.png', '/icons/apple-touch-icon.png', '/icons/icon-32.png', '/icons/icon.svg',
 ];
@@ -47,11 +49,20 @@ self.addEventListener('fetch', e => {
     }).catch(() => caches.match('/', { ignoreSearch: true })));
     return;
   }
-  // Static files: cache first, then network (and keep a copy)
-  e.respondWith(caches.match(req).then(hit => hit || fetch(req).then(res => {
-    if (res.ok) caches.open(SHELL).then(c => c.put(req, res.clone()));
+  // Fonts and icons never change: cache first.
+  if (url.pathname.startsWith('/fonts/') || url.pathname.startsWith('/icons/')) {
+    e.respondWith(caches.match(req).then(hit => hit || fetch(req).then(res => {
+      if (res.ok) { const copy = res.clone(); caches.open(SHELL).then(c => c.put(req, copy)); }
+      return res;
+    })));
+    return;
+  }
+  // Code and styles: network first, so a page never mixes a new HTML file with old scripts
+  // (or the reverse). The cached copy is only used offline.
+  e.respondWith(fetch(req, { cache: 'no-cache' }).then(res => {
+    if (res.ok) { const copy = res.clone(); caches.open(SHELL).then(c => c.put(req, copy)); }
     return res;
-  })));
+  }).catch(() => caches.match(req, { ignoreSearch: true })));
 });
 
 // Daily reminders: show the notification the server sends, and open the Daily when it's tapped.
@@ -61,7 +72,7 @@ self.addEventListener('push', e => {
   e.waitUntil(self.registration.showNotification(d.title || 'Today’s Daily is ready', {
     body: d.body || 'Same 20 questions for everyone. One try.',
     icon: '/icons/icon-192.png', badge: '/icons/icon-192.png', tag: 'daily',
-    data: { url: d.url || '/?go=daily' },
+    data: { url: d.url || '/?view=daily' },
   }));
 });
 self.addEventListener('notificationclick', e => {

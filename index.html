@@ -537,8 +537,16 @@
   @media (prefers-reduced-motion: reduce) {
     *, *::before, *::after { animation: none !important; transition: none !important; }
   }
+  .legacy { max-width: 560px; margin: 8px auto 0; padding: 10px 14px; border-radius: 14px; font-size: 13.5px; line-height: 1.4;
+    background: color-mix(in srgb, var(--accent) 12%, var(--surface)); color: var(--ink); display: flex; gap: 10px; align-items: center; justify-content: space-between; }
+  .legacy a { color: var(--accent); font-weight: 700; white-space: nowrap; }
+  .legacy[hidden] { display: none; }
+  body { display: flex; flex-direction: column; }
+  body > .legacy { flex: none; width: calc(100% - 32px); box-sizing: border-box; }
+  body > .app { flex: 1; min-height: 0; height: auto; width: 100%; box-sizing: border-box; }
 </style>
 
+<div class="legacy" id="legacyNote" role="note"><span>This is the original prototype. The full game, with checked leaderboards, the Daily and offline play, is at the new site.</span><a href="https://left-or-right-peach.vercel.app" target="_blank" rel="noopener">Open it</a></div>
 <div class="app">
 
   <!-- HOME -->

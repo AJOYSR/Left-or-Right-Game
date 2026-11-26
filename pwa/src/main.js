@@ -1,16 +1,28 @@
 import {
-  Run, ROUND_OPTIONS, BASE_LIMIT, MAX_PAUSES, MIN_MS, MAX_PER_ROUND, DAILY_ROUNDS, TYPES,
-  sideFor, valueLabel, makeQuestion, newSeed, parseCode, dayKey, keyToDate, dayNumber, addDays, cleanNickname,
-  streakInfo, levelInfo, badgeState,
-} from './core.js';
-import { api, ApiError, store, getToken, setToken, pending } from './api.js';
+  Run, ROUND_OPTIONS, BASE_LIMIT, MAX_PAUSES, MIN_MS, MAX_PER_ROUND, DAILY_ROUNDS, TYPES, RULES_VERSION, LATE_GRACE_MS,
+  sideFor, valueLabel, makeQuestion, newSeed, parseCode, keyToDate, dayNumber, addDays, cleanNickname,
+  streakInfo, levelInfo, statsFromGames, badgesFromStats, utcDayKey, msToNextUtcDay,
+} from './core.js?v=11';
+import { api, ApiError, store, getToken, setToken, outbox } from './api.js?v=11';
 
 const WORDS = ['', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine'];
 const DOTS = { 1: [4], 2: [0, 8], 3: [0, 4, 8], 4: [0, 2, 6, 8], 6: [0, 2, 3, 5, 6, 8], 7: [0, 2, 3, 4, 5, 6, 8], 8: [0, 1, 2, 3, 5, 6, 7, 8], 9: [0, 1, 2, 3, 4, 5, 6, 7, 8] };
 const mean = a => (a.length ? a.reduce((x, y) => x + y, 0) / a.length : null);
 const byScore = (a, b) => (b.score || 0) - (a.score || 0) || (a.avgMs ?? 1e9) - (b.avgMs ?? 1e9);
 const plausible = total => r => (r.score || 0) <= total * MAX_PER_ROUND && (r.avgMs == null || r.avgMs >= MIN_MS);
-let todayKey = dayKey();
+let todayKey = utcDayKey();   // the Daily is on UTC days, the same moment for everyone
+
+// ================= product counts =================
+// Event names only (no ids, no device details), added up per day on the server. See /privacy.
+let trackQ = [];
+function track(name) { trackQ.push(name); if (trackQ.length >= 15) flushTrack(); }
+function flushTrack() {
+  if (!trackQ.length || !navigator.onLine) return;
+  const names = trackQ; trackQ = [];
+  api('events', { names }).catch(() => {});
+}
+setInterval(flushTrack, 20000);
+addEventListener('visibilitychange', () => { if (document.hidden) flushTrack(); });
 
 // ================= error reporting =================
 // Problems on players' devices are sent to the server (at most 5 per visit), so they can be fixed.
@@ -46,10 +58,38 @@ let usingKeyboard = false;
 addEventListener('keydown', () => { usingKeyboard = true; }, true);
 addEventListener('pointerdown', () => { usingKeyboard = false; }, true);
 const focusKbd = el => { if (usingKeyboard && el) el.focus(); };
-const toast = msg => {
+const toast = (msg, ms = 2600) => {
   const t = $('toast'); t.textContent = msg; t.hidden = false;
-  clearTimeout(toast.t); toast.t = setTimeout(() => { t.hidden = true; }, 2600);
+  clearTimeout(toast.t); toast.t = setTimeout(() => { t.hidden = true; }, ms);
 };
+// Screen-reader announcements (questions, answers, results).
+const say = msg => { const el = $('sr'); el.textContent = ''; setTimeout(() => { el.textContent = msg; }, 30); };
+
+// ---------- dialogs: everything behind an open dialog is inert, and focus stays inside ----------
+const dialogStack = [];
+function setInertBehind(dialogEl, on) {
+  // dialogs inside the game screen (pause) lock the rest of the game; sheets lock the whole app
+  const inGame = $('game').contains(dialogEl);
+  const targets = inGame
+    ? [$('hud'), document.querySelector('.pads'), ...[...$('stage').children].filter(c => c !== dialogEl)]
+    : [document.querySelector('.app'), ...document.querySelectorAll('body > .scrim')].filter(x => x !== dialogEl && !x.contains(dialogEl));
+  targets.forEach(t => { if (t) t.inert = on; });
+}
+function openDialog(el, focusEl) {
+  if (!dialogStack.includes(el)) dialogStack.push(el);
+  el.hidden = false;
+  setInertBehind(el, true);
+  const f = focusEl || el.querySelector('button:not([hidden]):not(:disabled), input, a[href]');
+  setTimeout(() => f?.focus({ preventScroll: true }), 30);
+}
+function closeDialog(el, returnTo) {
+  el.hidden = true;
+  setInertBehind(el, false);
+  const i = dialogStack.indexOf(el); if (i >= 0) dialogStack.splice(i, 1);
+  // re-lock for any dialog still open underneath
+  dialogStack.forEach(d => setInertBehind(d, true));
+  returnTo?.focus?.({ preventScroll: true });
+}
 
 // ================= device settings =================
 let soundOn = store.get('sound', true);
@@ -98,8 +138,16 @@ applyTheme(store.get('theme', null));
 // ================= text size =================
 const SIZES = [1, 1.12, 1.25], SIZE_NAMES = ['normal', 'large', 'extra large'];
 let sizeIdx = Math.min(SIZES.length - 1, Math.max(0, store.get('size', 0)));
+// Space left after text zoom decides the compact layouts (media queries can't see the zoom).
+function fitClasses() {
+  const z = SIZES[sizeIdx], h = innerHeight / z, w = innerWidth / z;
+  document.documentElement.classList.toggle('short', h < 640);
+  document.documentElement.classList.toggle('narrow', w < 340);
+}
+addEventListener('resize', fitClasses);
 function applySize() {
   document.documentElement.style.setProperty('--zoom', SIZES[sizeIdx]);
+  fitClasses();
   $('sizeBtn').setAttribute('aria-label', `Text size: ${SIZE_NAMES[sizeIdx]}`);
   $('sizeLabel').textContent = `Text size: ${SIZE_NAMES[sizeIdx]}`;
   $('sizeBtn').classList.toggle('on', sizeIdx > 0);
@@ -155,8 +203,7 @@ function askNickname(then, { rename = false } = {}) {
   $('nickOffline').hidden = rename;
   $('nickInput').value = rename && me ? me.nickname : '';
   $('nickError').hidden = true;
-  $('nickScrim').hidden = false;
-  setTimeout(() => $('nickInput').focus(), 50);
+  openDialog($('nickScrim'), $('nickInput'));
   $('nickForm').dataset.rename = rename ? '1' : '';
 }
 $('nickForm').addEventListener('submit', async e => {
@@ -172,7 +219,8 @@ $('nickForm').addEventListener('submit', async e => {
       const r = await api('register', { nickname }); setToken(r.token); me = r.player;
     }
     store.set('me', me);
-    $('nickScrim').hidden = true;
+    closeDialog($('nickScrim'));
+    track('name_saved');
     renderAll(); refreshRemote();
     const next = afterNick; afterNick = null; next && next();
   } catch (err) {
@@ -180,24 +228,23 @@ $('nickForm').addEventListener('submit', async e => {
     $('nickError').hidden = false;
   } finally { $('nickSave').disabled = false; }
 });
-$('nickClose').addEventListener('click', () => { $('nickScrim').hidden = true; afterNick = null; });
-$('nickOffline').addEventListener('click', () => { $('nickScrim').hidden = true; const next = afterNick; afterNick = null; next && next({ offline: true }); });
+$('nickClose').addEventListener('click', () => { closeDialog($('nickScrim')); afterNick = null; });
+$('nickOffline').addEventListener('click', () => { closeDialog($('nickScrim')); const next = afterNick; afterNick = null; next && next({ offline: true }); });
 
 // Play first: new players get a guest account without being asked anything, and pick a
 // nickname after their first game. Calls fn() once there is a player (or with {offline:true}).
-async function ensurePlayer() {
-  if (getToken()) return true;
-  if (!online) return false;
-  try {
-    const r = await api('register', { guest: true });
-    setToken(r.token); me = r.player; store.set('me', me);
-    return true;
-  } catch (e) {
-    toast(e.status === 429 ? e.message : 'Couldn’t reach the server, so this game stays on this device.');
-    return false;
+let registering = null;
+function ensurePlayer({ quiet = false } = {}) {
+  if (getToken()) return Promise.resolve(true);
+  if (!online) return Promise.resolve(false);
+  if (!registering) {
+    registering = api('register', { guest: true })
+      .then(r => { setToken(r.token); me = r.player; store.set('me', me); return true; })
+      .catch(e => { if (!quiet) toast(e.status === 429 ? e.message : 'Couldn’t reach the server, so this game stays on this device.'); return false; })
+      .finally(() => { registering = null; });
   }
+  return registering;
 }
-function withPlayer(fn) { ensurePlayer().then(ok => fn(ok ? undefined : { offline: true })); }
 
 // ================= game state =================
 const RING_LEN = 2 * Math.PI * 46;
@@ -237,43 +284,72 @@ function resetStage(tutorial) {
   setPads(null);
 }
 
-function startTutorial(steps = TUTORIAL) {
+// `intent` is what the player was trying to do when practice started (a Daily, a friend's
+// challenge, or Classic). Skip and the Ready button both continue to exactly that.
+function startTutorial(steps = TUTORIAL, intent = null) {
   clearAll();
-  g = { tutorial: true, step: 0, steps, hardIntro: steps === HARD_TUTORIAL, pauses: 0, q: null, open: false };
+  g = { tutorial: true, step: 0, steps, hardIntro: steps === HARD_TUTORIAL, pauses: 0, q: null, open: false, intent: intent || { mode: 'classic' } };
   show('game'); resetStage(true); nextRound();
+  track('practice_start');
+  ensurePlayer({ quiet: true });   // make the guest player while they practise, so the real game starts at once
+}
+const intentLabel = it => it.mode === 'daily' ? 'Start today’s Daily'
+  : it.mode === 'challenge' ? 'Start the challenge'
+  : `Play ${rounds} rounds${hard ? ' · Hard' : ''}`;
+// What comes after practice: the Hard intro if the game needs it, otherwise the game itself.
+function afterPractice(intent) {
+  const needsHard = intent.mode === 'challenge' ? !!parseCode(intent.code)?.hard : intent.mode === 'classic' && hard;
+  if (needsHard && !store.get('hardIntroDone', false)) return startTutorial(HARD_TUTORIAL, intent);
+  return startGame(intent);
 }
 function finishTutorial() {
   store.set(g.hardIntro ? 'hardIntroDone' : 'tutorialDone', true);
+  track('practice_done');
   $('coach').hidden = true;
   $('readyText').textContent = g.hardIntro
     ? 'Hard mode: watch for swapped sides, words and dots. The timer shrinks as you go.'
     : 'Each answer now has 3 seconds, and the question can switch at any time.';
-  $('readyPlayBtn').textContent = `Play ${rounds} rounds${hard ? ' · Hard' : ''}`;
+  $('readyPlayBtn').textContent = intentLabel(g.intent);
   $('readyOverlay').hidden = false;
-  focusKbd($('readyPlayBtn'));
+  setTimeout(() => $('readyPlayBtn').focus({ preventScroll: true }), 30);
 }
 
 // ---------- starting a game ----------
-// opts: { mode: 'classic' | 'daily' | 'challenge', code }
+// opts: { mode: 'classic' | 'daily' | 'challenge' | 'practice', code }
+// Returns true if a game started, false if it couldn't (the current screen is left as it was).
 let starting = false;
+const START_BTNS = ['playBtn', 'dailyBtn', 'cAccept', 'readyPlayBtn', 'againBtn', 'skipBtn', 'landingPlay'];
+function setStarting(on) {
+  starting = on;
+  for (const id of START_BTNS) { const b = $(id); if (!b) continue; b.disabled = on; b.setAttribute('aria-busy', String(on)); }
+  document.body.classList.toggle('starting', on);
+}
 async function startGame(opts = {}) {
-  if (starting) return;
+  if (starting) return false;
   const mode = opts.mode || 'classic';
-  if (mode !== 'classic' && !getToken()) return withPlayer(o => (o && o.offline ? toast('The Daily and challenges need a nickname and a connection.') : startGame(opts)));
-  starting = true;
+  if (mode === 'practice') return startPractice();
+  setStarting(true);
   let info = null;
   try {
+    if (mode !== 'classic' || online) await ensurePlayer({ quiet: mode === 'classic' });
+    if (mode !== 'classic' && !getToken()) { toast(online ? 'Couldn’t reach the server. Try again in a moment.' : 'You’re offline. The Daily and challenges need a connection.'); return false; }
     if (getToken() && online) {
-      info = await api('start', mode === 'classic' ? { mode, rounds, hard } : mode === 'daily' ? { mode, day: todayKey } : { mode, code: opts.code });
+      const base = { v: RULES_VERSION };
+      info = await api('start', mode === 'classic' ? { ...base, mode, rounds, hard } : mode === 'daily' ? { ...base, mode, day: todayKey } : { ...base, mode, code: opts.code });
     }
   } catch (e) {
-    if (e.status === 401) { setToken(null); me = null; store.set('me', null); starting = false; return withPlayer(() => startGame(opts)); }
-    if (mode !== 'classic' || !e.offline) { starting = false; toast(e.offline ? 'You’re offline. This needs a connection.' : e.message); refreshRemote(); return; }
-  } finally { starting = false; }
-  if (mode !== 'classic' && !info) { toast('You’re offline. This needs a connection.'); return; }
+    if (e.status === 401) { setToken(null); me = null; store.set('me', null); setStarting(false); return startGame(opts); }
+    if (e.status === 426) { toast(e.message, 6000); setTimeout(() => location.reload(), 2500); return false; }
+    if (mode !== 'classic' || !e.offline) {
+      toast(e.offline ? 'You’re offline. This needs a connection.' : e.message, 4000);
+      if (e.status === 409) refreshRemote();
+      return false;
+    }
+  } finally { setStarting(false); }
+  if (mode !== 'classic' && !info) { toast('You’re offline. This needs a connection.'); return false; }
 
   clearAll();
-  const cfg = info ? { seed: info.seed, rounds: info.rounds, hard: info.hard } : { seed: newSeed(), rounds, hard };
+  const cfg = info ? { seed: info.seed, rounds: info.rounds, hard: info.hard, version: info.v || 1 } : { seed: newSeed(), rounds, hard, version: RULES_VERSION };
   g = {
     mode, gameId: info?.gameId || null, day: info?.day || null, code: info?.code || null, ...cfg,
     run: new Run(cfg), q: null, open: false, started: 0, paused: false, pauses: 0, timed: true,
@@ -282,11 +358,31 @@ async function startGame(opts = {}) {
   const saved = g.gameId ? store.get('progress.' + g.gameId, null) : null;
   if (saved) resumeFrom(saved);
   else if (!g.gameId) toast('Offline game: your score stays on this device.');
+  track(mode === 'challenge' ? 'challenge_start' : 'play_start');
   countdown(3, nextRound);
+  return true;
 }
 
-const play = () => withPlayer(() => (needsTutorial() ? startTutorial()
-  : hard && !store.get('hardIntroDone', false) ? startTutorial(HARD_TUTORIAL) : startGame()));
+// Untimed practice: a normal question set with no clock, never posted. For learning the rules,
+// or for anyone who wants to play without time pressure.
+function startPractice() {
+  clearAll();
+  const cfg = { seed: newSeed(), rounds: 20, hard: false, version: RULES_VERSION };
+  const run = new Run(cfg);
+  run.qs.forEach(q => { q.limit = 600000; });
+  g = { mode: 'practice', gameId: null, ...cfg, run, q: null, open: false, started: 0, paused: false, pauses: 0, timed: false, untimed: true };
+  show('game'); resetStage(false);
+  track('untimed_start');
+  nextRound();
+  return true;
+}
+
+// Practice comes first for new players, whatever they tapped (Play, a Daily or a friend's challenge),
+// and it starts at once: the guest player is made in the background meanwhile.
+function play(intent = { mode: 'classic' }) {
+  if (needsTutorial()) return startTutorial(TUTORIAL, intent);
+  return afterPractice(intent);
+}
 
 // ---------- resume (closing the app mid-game shouldn't wipe a Daily or challenge) ----------
 function saveProgress() {
@@ -297,13 +393,14 @@ const clearProgress = () => { if (g && g.gameId) store.set('progress.' + g.gameI
 // Same rule as leaving mid-game: a question that was on screen is replaced (uses a pause)
 // or, with no pauses left, counts as missed. A question is never shown twice.
 function resumeFrom(sv) {
-  try { g.run = Run.replay({ seed: g.seed, rounds: g.rounds, hard: g.hard }, sv.events, { allowUnfinished: true }); }
+  try { g.run = Run.replay({ seed: g.seed, rounds: g.rounds, hard: g.hard, version: g.version }, sv.events, { allowUnfinished: true }); }
   catch { store.set('progress.' + g.gameId, null); return; }
   g.pauses = sv.pauses || 0;
   let note = `Picked up at round ${Math.min(g.run.round + 1, g.rounds)}.`;
   if (sv.open && !g.run.done) {
     const q = g.run.next();
-    if (g.pauses < MAX_PAUSES && g.run.skips < MAX_PAUSES) { g.pauses++; g.run.skip(); note = 'Picked up where you left off. The open question is replaced, which used a pause.'; }
+    if (g.run.version >= 2) { g.pauses++; g.run.skip(); note = 'Picked up where you left off. The question that was on screen counted as missed.'; }
+    else if (g.pauses < MAX_PAUSES && g.run.skips < MAX_PAUSES) { g.pauses++; g.run.skip(); note = 'Picked up where you left off. The open question is replaced, which used a pause.'; }
     else { g.run.answer(null, q.limit); note = 'Picked up where you left off. The open question counted as missed (no pauses left).'; }
   }
   $('hRound').textContent = Math.max(1, g.run.round); $('hScore').textContent = g.run.score; $('hStreak').textContent = g.run.streak;
@@ -327,6 +424,7 @@ function setPads(q) {
   $('padLText').textContent = L; $('padRText').textContent = R;
   $('pL').textContent = L; $('pR').textContent = R;
   $('padL').className = 'pad l'; $('padR').className = 'pad r';
+  $('padL').setAttribute('aria-label', `${L}, left`); $('padR').setAttribute('aria-label', `${R}, right`);
   const swapped = !!(q && q.flip);
   $('swapTag').hidden = !swapped;
 }
@@ -340,7 +438,7 @@ function renderNumber(q) {
     for (let i = 0; i < 9; i++) { const d = document.createElement('i'); if (DOTS[q.n].includes(i)) d.className = 'on'; grid.append(d); }
     num.append(grid); num.setAttribute('aria-label', String(q.n));
   } else { num.textContent = q.n; num.removeAttribute('aria-label'); }
-  void num.offsetWidth; num.classList.add('in');
+  // no entrance animation: the number is readable the instant the clock starts
 }
 
 function nextRound() {
@@ -364,12 +462,27 @@ function nextRound() {
   renderNumber(g.q);
   $('verdict').textContent = ''; $('verdict').className = 'verdict';
   if (!g.tutorial && g.run.round > 3) $('swipeHint').hidden = true;
-  g.started = performance.now();
-  g.open = true;
-  if (g.timed) {
-    roundTimer = setTimeout(() => answer(null), g.q.limit);
-    tick(); saveProgress();
-  } else { $('ring').style.strokeDashoffset = 0; $('ring').classList.remove('late'); }
+  const t = TYPES[g.q.type];
+  say(`${t.left} or ${t.right}? ${g.q.form === 'dots' ? g.q.n + ' dots' : g.q.n}${g.q.flip ? '. Sides swapped' : ''}`);
+  // The clock starts on the frame the number is drawn, and the same deadline drives the ring,
+  // the timeout and the scoring.
+  const myG = g;
+  raf = requestAnimationFrame(() => {
+    if (g !== myG || g.paused) return;
+    g.started = performance.now();
+    g.open = true; held = null;
+    if (g.timed) {
+      roundTimer = setTimeout(onDeadline, g.q.limit);
+      tick(); saveProgress();
+    } else { $('ring').style.strokeDashoffset = 0; $('ring').classList.remove('late'); }
+  });
+}
+// At the deadline a finger already on a pad still counts if it lifts within the grace period
+// (the answer's time is when it touched down).
+function onDeadline() {
+  if (!g || !g.open) return;
+  if (held) { roundTimer = setTimeout(() => { if (g && g.open) { clearHold(); answer(null); } }, LATE_GRACE_MS); return; }
+  answer(null);
 }
 
 function tick() {
@@ -380,11 +493,15 @@ function tick() {
   raf = requestAnimationFrame(tick);
 }
 
-function answer(dir) {
+// `at` is when the input began (key down, finger down on a pad, or the start of a swipe), so
+// taps, swipes and keys are timed the same way.
+function answer(dir, at = performance.now()) {
   if (!g || !g.open) return;
+  const raw = Math.max(0, at - g.started);
+  // Early-input rule: anything in the first 150 ms is a guess and counts as wrong (it says so).
   g.open = false;
   clearTimeout(roundTimer); cancelAnimationFrame(raf);
-  const ms = dir === null && !g.tutorial ? g.q.limit : performance.now() - g.started;
+  const ms = dir === null && !g.tutorial ? g.q.limit : raw;
   const q = g.q, v = $('verdict');
 
   if (g.tutorial) {
@@ -402,12 +519,13 @@ function answer(dir) {
   }
 
   const r = g.run.answer(dir, ms);
+  say(r.ok ? 'Correct' : r.early ? 'Too early' : dir === null ? `Too slow, ${q.n} is ${r.label}` : `Wrong, ${q.n} is ${r.label}`);
   if (r.ok) {
-    v.textContent = `+${r.pts} · ${(ms / 1000).toFixed(2)}s`;
+    v.textContent = g.untimed ? 'Correct' : `+${r.pts} · ${(ms / 1000).toFixed(2)}s`;
     v.className = 'verdict good'; bump(v, 'show'); bump($('num'), 'good');
     beep(880 + Math.min(g.run.streak, 8) * 40, 0.09, 'triangle'); buzz(15);
   } else {
-    v.textContent = r.early ? 'Too early. Read the number first'
+    v.textContent = r.early ? 'Too early (under 0.15 s). Read the number first'
       : dir === null ? `Too slow. ${q.n} is ${r.label}`
       : q.flip ? `${q.n} is ${r.label}, and the sides were swapped` : `${q.n} is ${r.label}`;
     v.className = 'verdict bad'; bump(v, 'show'); bump($('num'), 'bad');
@@ -428,25 +546,35 @@ function clearAll() {
 }
 
 // ================= pause =================
-// The number is hidden while paused; a question interrupted by a pause is replaced and the
-// streak ends; 3 pauses per game. The server enforces the same limits when it re-scores.
+// While paused the number is hidden. Pausing between questions is free and unlimited. Pausing
+// while a question is showing counts that question as missed, so a Daily or challenge has the
+// same questions for everyone. (Games started on rules v1 keep their old limit of 3 pauses.)
+const v1Limits = () => g && !g.tutorial && g.run && g.run.version < 2;
 function renderPauseBtn() {
-  const left = g ? MAX_PAUSES - g.pauses : MAX_PAUSES;
-  $('pauseBtn').disabled = !!g && !g.tutorial && left <= 0;
-  $('pauseBtn').setAttribute('aria-label', left > 0 ? `Pause game, ${left} left` : 'No pauses left');
+  const left = g && v1Limits() ? MAX_PAUSES - g.pauses : Infinity;
+  $('pauseBtn').disabled = left <= 0;
+  $('pauseBtn').setAttribute('aria-label', left === Infinity ? 'Pause game' : left > 0 ? `Pause game, ${left} left` : 'No pauses left');
 }
 
 function pauseGame(reason) {
   if (!g || g.paused || $('game').hidden || !$('readyOverlay').hidden) return;
   if (g.tutorial && !g.timed) return;
-  if (reason === 'button' && !g.tutorial && g.pauses >= MAX_PAUSES) { toast('No pauses left in this game'); return; }
+  if (reason === 'button' && v1Limits() && g.pauses >= MAX_PAUSES) { toast('No pauses left in this game'); return; }
   const mid = g.open;
-  clearAll();
+  clearAll(); clearHold();
   g.open = false; g.paused = true;
   $('num').textContent = ''; $('num').className = 'number'; $('verdict').textContent = '';
   let msg = 'Take your time. The game is waiting.';
   if (g.tutorial) msg = 'Practice is paused.';
-  else if (g.pauses >= MAX_PAUSES) {
+  else if (g.untimed) msg = 'Practice is paused. Nothing here is timed or posted.';
+  else if (!v1Limits()) {
+    g.pauses++;
+    if (mid) {
+      g.run.skip();
+      msg = 'The question on screen counted as missed. Pausing between questions is free: wait for the result before you pause.';
+    }
+    if (reason === 'away') msg = 'You left the game, so it paused. ' + msg;
+  } else if (g.pauses >= MAX_PAUSES) {
     if (mid) g.run.answer(null, g.q.limit);
     msg = mid ? 'You left with no pauses left, so that question counted as missed.' : 'You left with no pauses left.';
   } else {
@@ -458,23 +586,26 @@ function pauseGame(reason) {
     }
     if (reason === 'away') msg = 'You left the game, so it paused. ' + msg;
   }
-  if (!g.tutorial && g.mode !== 'classic') msg += ' This is your one try, so quitting ends it with the score you have.';
-  if (!g.tutorial) { $('hStreak').textContent = g.run.streak; saveProgress(); }
+  if (!g.tutorial && (g.mode === 'daily' || g.mode === 'challenge')) msg += ' This is your one try, so quitting ends it with the score you have.';
+  if (!g.tutorial) { $('hStreak').textContent = g.run.streak; $('hScore').textContent = g.run.score; saveProgress(); }
   $('pauseMsg').textContent = msg;
   $('pRound').textContent = g.tutorial ? `${g.step + 1}/${g.steps.length}` : `${Math.min(g.run.round + 1, g.rounds)}/${g.rounds}`;
   $('pScore').textContent = (g.tutorial ? 0 : g.run.score).toLocaleString();
-  $('pLeft').textContent = g.tutorial ? '–' : Math.max(0, MAX_PAUSES - g.pauses);
+  $('pLeftK').textContent = v1Limits() ? 'Pauses left' : 'Pauses';
+  $('pLeft').textContent = g.tutorial ? '–' : v1Limits() ? Math.max(0, MAX_PAUSES - g.pauses) : g.pauses;
   $('pauseMain').hidden = false; $('pauseConfirm').hidden = true;
-  $('pauseOverlay').hidden = false;
   document.querySelector('.app').classList.add('is-paused');
   renderPauseBtn();
-  focusKbd($('resumeBtn'));
+  openDialog($('pauseOverlay'), $('resumeBtn'));
+  // a run that ends on a missed question finishes when they resume
 }
 function resumeGame() {
   if (!g || !g.paused) return;
-  $('pauseOverlay').hidden = true;
+  closeDialog($('pauseOverlay'));
   document.querySelector('.app').classList.remove('is-paused');
   g.paused = false;
+  if (!g.tutorial && g.run.done) return finish(false);
+  if (g.untimed) return nextRound();
   countdown(3, nextRound);
 }
 let confirmAction = null;
@@ -487,48 +618,84 @@ function askConfirm(text, yesLabel, action) {
 document.addEventListener('visibilitychange', () => { if (document.hidden) pauseGame('away'); });
 $('pauseBtn').addEventListener('click', () => pauseGame('button'));
 $('resumeBtn').addEventListener('click', resumeGame);
-$('restartBtn').addEventListener('click', () => askConfirm('Restart from round 1? This score won’t be saved.', 'Restart', () => startGame()));
+$('restartBtn').addEventListener('click', () => askConfirm('Restart from round 1? This score won’t be saved.', 'Restart',
+  () => (g && g.untimed ? startPractice() : startGame({ mode: 'classic' }))));
 $('quitBtn').addEventListener('click', () => {
-  if (g && !g.tutorial && g.mode !== 'classic') askConfirm('End your one try now? Your score so far will count.', 'End it', () => { clearAll(); finish(true); });
+  if (g && !g.tutorial && (g.mode === 'daily' || g.mode === 'challenge')) askConfirm('End your one try now? Your score so far will count.', 'End it', () => { clearAll(); finish(true); });
   else askConfirm('Quit this game? This score won’t be saved.', 'Quit', () => { clearAll(); g = null; goHome(); });
 });
 $('confirmNo').addEventListener('click', () => { $('pauseConfirm').hidden = true; $('pauseMain').hidden = false; focusKbd($('resumeBtn')); });
-$('confirmYes').addEventListener('click', () => {
+$('confirmYes').addEventListener('click', async () => {
+  const a = confirmAction; confirmAction = null;
+  const was = g;
   document.querySelector('.app').classList.remove('is-paused');
-  $('pauseOverlay').hidden = true;
+  closeDialog($('pauseOverlay'));
   if (g) g.paused = false;
-  const a = confirmAction; confirmAction = null; a && a();
+  const ok = a ? await a() : true;
+  // A restart that couldn't start (no connection, server busy) leaves the paused game as it was.
+  if (ok === false && g === was && g) {
+    g.paused = true;
+    document.querySelector('.app').classList.add('is-paused');
+    $('pauseMain').hidden = false; $('pauseConfirm').hidden = true;
+    openDialog($('pauseOverlay'), $('resumeBtn'));
+    track('restart_fail');
+  }
 });
 
 // ================= input =================
+// Keys answer on key down. Pads answer when the finger lifts on the same pad (slide off to
+// cancel), timed from when it touched down. Swipes are timed from the start of the swipe.
+const evTime = e => (e && e.timeStamp > 0 && Math.abs(performance.now() - e.timeStamp) < 5000 ? e.timeStamp : performance.now());
+let held = null;   // { dir, at, pointerId }
+function clearHold() {
+  if (!held) return;
+  $(held.dir === 'left' ? 'padL' : 'padR').classList.remove('press');
+  held = null;
+}
 document.addEventListener('keydown', e => {
-  if (e.repeat || !$('shareScrim').hidden || !$('nickScrim').hidden) return;
+  if (e.repeat || dialogStack.some(d => d.classList.contains('scrim'))) return;
   if (!$('game').hidden) {
-    if (e.key === 'ArrowLeft' || e.key === 'a' || e.key === 'A') { e.preventDefault(); press('left'); }
-    if (e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D') { e.preventDefault(); press('right'); }
+    if (e.key === 'ArrowLeft' || e.key === 'a' || e.key === 'A') { e.preventDefault(); press('left', evTime(e)); }
+    if (e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D') { e.preventDefault(); press('right', evTime(e)); }
     if (e.key === 'Escape' || e.key === 'p' || e.key === 'P') {
       e.preventDefault();
       if (g && g.paused) { if (!$('pauseConfirm').hidden) $('confirmNo').click(); else resumeGame(); }
       else pauseGame('button');
     }
   } else if (!$('stats').hidden && e.key === 'Escape') goHome();
-  else if (!$('home').hidden && (e.key === 'Enter' || e.key === ' ') && !['BUTTON', 'INPUT', 'SUMMARY'].includes(document.activeElement?.tagName)) { e.preventDefault(); play(); }
 });
-function press(dir) {
+function press(dir, at) {
   const pad = $(dir === 'left' ? 'padL' : 'padR');
   pad.classList.add('press'); setTimeout(() => pad.classList.remove('press'), 90);
-  answer(dir);
+  answer(dir, at);
 }
 for (const [id, dir] of [['padL', 'left'], ['padR', 'right']]) {
-  $(id).addEventListener('pointerdown', e => { e.preventDefault(); press(dir); });
-  $(id).addEventListener('click', e => { if (e.detail === 0) press(dir); });
+  const pad = $(id);
+  pad.addEventListener('pointerdown', e => {
+    e.preventDefault();
+    if (!g || !g.open || held) return;
+    held = { dir, at: evTime(e), pointerId: e.pointerId };
+    pad.classList.add('press');
+    try { pad.setPointerCapture(e.pointerId); } catch {}
+  });
+  pad.addEventListener('pointerup', e => {
+    if (!held || held.dir !== dir || held.pointerId !== e.pointerId) return;
+    const r = pad.getBoundingClientRect();
+    const inside = e.clientX >= r.left - 12 && e.clientX <= r.right + 12 && e.clientY >= r.top - 12 && e.clientY <= r.bottom + 12;
+    const at = held.at; clearHold();
+    if (inside) answer(dir, at);
+  });
+  pad.addEventListener('pointercancel', clearHold);
+  pad.addEventListener('lostpointercapture', () => { if (held && held.dir === dir) setTimeout(() => { if (held && held.dir === dir) clearHold(); }, 0); });
+  // keyboard / switch access: Enter or Space on a focused pad
+  pad.addEventListener('click', e => { if (e.detail === 0) press(dir, performance.now()); });
 }
-let sx = 0, sy = 0, tracking = false;
-$('stage').addEventListener('pointerdown', e => { sx = e.clientX; sy = e.clientY; tracking = true; });
+let sx = 0, sy = 0, st = 0, tracking = false;
+$('stage').addEventListener('pointerdown', e => { sx = e.clientX; sy = e.clientY; st = evTime(e); tracking = true; });
 $('stage').addEventListener('pointerup', e => {
   if (!tracking) return; tracking = false;
   const dx = e.clientX - sx, dy = e.clientY - sy;
-  if (Math.abs(dx) > 40 && Math.abs(dx) > Math.abs(dy) * 1.2) answer(dx < 0 ? 'left' : 'right');
+  if (Math.abs(dx) > 40 && Math.abs(dx) > Math.abs(dy) * 1.2) answer(dx < 0 ? 'left' : 'right', g && st >= g.started ? st : evTime(e));
 });
 $('stage').addEventListener('pointercancel', () => { tracking = false; });
 
@@ -536,15 +703,15 @@ $('stage').addEventListener('pointercancel', () => { tracking = false; });
 let lastRun = null;
 
 async function finish(ended) {
-  const before = { level: levelInfo(totalScore()).level, badges: earnedBadges() };
+  if (g.untimed) return finishPractice();
+  const before = { level: levelInfo(lifetime().totalScore).level, badges: earnedBadges() };
   const s = g.run.summary();
   const run = {
-    mode: g.mode, gameId: g.gameId, rounds: g.rounds, hard: g.hard, seed: g.seed, code: g.code, day: g.day,
-    ...s, pauses: g.pauses, log: g.run.log, date: new Date(), rank: null, posted: false,
+    mode: g.mode, gameId: g.gameId, rounds: g.rounds, hard: g.hard, seed: g.seed, code: g.code, day: g.day, version: g.version,
+    ...s, pauses: g.pauses, log: g.run.log, date: new Date(), place: null, of: null, bestRank: null, posted: false,
   };
   lastRun = run;
   const events = g.run.events;
-  clearProgress();
   localPlays++; store.set('plays', localPlays);
 
   if (run.mode === 'classic') {
@@ -555,41 +722,101 @@ async function finish(ended) {
   if (run.mode === 'daily') { const h = store.get('daily.history', {}); h[run.day] = run.score; store.set('daily.history', h); }
   if (run.mode === 'challenge') store.set('chal.' + run.code, run.score);
   run.perfect = run.correct === run.rounds;
-  if (!run.gameId) addLocalHistory(run);
+  // Every finished game is written to this device first, so stats, bests and streaks never wait on the network.
+  addLocalHistory(run);
+  if (run.gameId) outbox.add({ gameId: run.gameId, events, ended: !!ended, mode: run.mode, day: run.day, code: run.code, score: run.score });
+  clearProgress();
+  track('game_finish');
 
   renderResults(run);
   show('results');
+  say(`Finished. Score ${run.score}. ${run.correct} of ${run.rounds} correct.`);
   beep(run.isBest ? 1040 : 620, 0.2, 'triangle');
 
   if (run.gameId) {
-    $('saveStatus').textContent = 'Posting…';
-    try {
-      const r = await api('finish', { gameId: run.gameId, events, ended: !!ended });
-      run.rank = r.rank; run.of = r.of; run.posted = true;
-      $('saveStatus').textContent = 'Posted';
-      // your account lives on this device: after a few games, remind once to keep a backup code
-      if (!store.get('backupNudged', false) && gameHistory.filter(x => !x.local).length >= 2) {
-        store.set('backupNudged', true);
-        setTimeout(() => toast('Tip: copy your player code (Stats → Play on another device) so you never lose your scores.'), 2200);
-      }
-    } catch (e) {
-      if (e.offline) { pending.add({ gameId: run.gameId, events, ended: !!ended, mode: run.mode, day: run.day, code: run.code }); $('saveStatus').textContent = 'Will post when you’re back online'; }
-      else { $('saveStatus').textContent = e.status === 422 ? 'Couldn’t be verified, so not posted' : e.message; }
+    setSave(run, 'sending');
+    await flushOutbox({ force: true });
+    // your account lives on this device: after a few games, remind once to keep a backup code
+    if (run.posted && !store.get('backupNudged', false) && gameHistory.filter(x => !x.local).length >= 2) {
+      store.set('backupNudged', true);
+      setTimeout(() => toast('Tip: copy your player code (Stats → Play on another device) so you never lose your scores.'), 2200);
     }
     await refreshRemote();
     renderResults(run, { skipCount: true });
   } else {
-    $('saveStatus').textContent = 'Offline game: saved on this device';
+    setSave(run, 'local');
   }
   celebrate(before);
+}
+
+// Where this game's score is: on the device, on its way, posted, or needing attention.
+function setSave(run, state, detail) {
+  run.saveState = state;
+  const el = $('rSave');
+  const text = {
+    local: run.mode === 'practice' ? 'Practice: not posted' : 'Offline game: saved on this device only',
+    sending: 'Saved on this device · posting…',
+    waiting: 'Saved on this device · will post when the server is reachable',
+    posted: 'Posted to the leaderboard',
+    failed: `Not posted: ${detail || 'this game couldn’t be verified'}`,
+  }[state];
+  el.textContent = text; el.dataset.state = state;
+  if (run === lastRun && state === 'posted') say('Score posted');
+}
+
+// Send everything waiting in the outbox, and update whatever is on screen.
+let retryTimer = 0;
+async function flushOutbox({ force = false } = {}) {
+  if (!getToken()) return [];
+  const res = await outbox.flush({ force });
+  let posted = 0;
+  for (const r of res) {
+    const run = lastRun && lastRun.gameId === r.gameId ? lastRun : null;
+    if (r.state === 'posted') {
+      posted++;
+      markPosted(r.gameId);
+      if (run) {
+        Object.assign(run, { posted: true, place: r.result.place ?? null, of: r.result.of ?? null, bestRank: r.result.bestRank ?? null });
+        setSave(run, 'posted');
+        if (!$('results').hidden) renderResults(run, { skipCount: true });
+      }
+    } else if (r.state === 'pending') {
+      if (run) setSave(run, 'waiting');
+      track('finish_retry');
+    } else {
+      if (run) setSave(run, 'failed', r.error?.status === 422 ? null : r.error?.message);
+      track('finish_failed');
+    }
+  }
+  if (posted && !(posted === 1 && res.length === 1 && lastRun && res[0].gameId === lastRun.gameId)) toast(`Posted ${posted} saved game${posted > 1 ? 's' : ''}`);
+  // try again later for anything still waiting
+  clearTimeout(retryTimer);
+  const next = outbox.pending().map(x => x.nextAt).sort((x, y) => x - y)[0];
+  if (next) retryTimer = setTimeout(() => { flushOutbox().then(renderAll); }, Math.max(3000, next - Date.now()));
+  renderNet();
+  return res;
+}
+function markPosted(gameId) {
+  let changed = false;
+  gameHistory = gameHistory.map(x => (x.id === gameId && x.local ? (changed = true, { ...x, local: false, posted: true }) : x));
+  if (changed) store.set('history', gameHistory);
+}
+
+function finishPractice() {
+  const s = g.run.summary();
+  lastRun = { mode: 'practice', gameId: null, rounds: g.rounds, hard: false, ...s, pauses: g.pauses, log: g.run.log, date: new Date() };
+  renderResults(lastRun);
+  show('results');
+  setSave(lastRun, 'local');
+  say(`Practice finished. ${s.correct} of ${s.rounds} correct.`);
 }
 
 // After a game: say so when a level or badge is reached.
 function celebrate(before) {
   const msgs = [];
-  const L = levelInfo(totalScore());
+  const L = levelInfo(lifetime().totalScore);
   if (L.level > before.level) msgs.push(`Level up! You’re now level ${L.level} · ${L.title}`);
-  const now = badgeState(statGames(), todayKey);
+  const now = badgesFromStats(lifetime());
   for (const b of now) if (b.earned && !before.badges.has(b.id)) msgs.push(`Badge earned: ${b.name}`);
   msgs.forEach((m, i) => setTimeout(() => { toast(m); beep(990 + i * 120, 0.12, 'triangle'); }, 1400 + i * 2700));
 }
@@ -604,17 +831,24 @@ function renderResults(run, { skipCount = false } = {}) {
     run.dayStreak = streak;
     badgeText = streak > 1 ? `${streak}-day streak` : 'Streak started. Come back tomorrow';
   }
-  $('rXp').hidden = !run.score;
+  const practice = run.mode === 'practice';
+  document.body.classList.toggle('practice-result', practice);
+  $('rXp').hidden = !run.score || practice;
   $('rXp').textContent = `+${Math.floor(run.score / 10).toLocaleString()} XP`;
   // guests: offer to put a name on this score
   $('saveName').hidden = !(me && me.guest && run.gameId);
   if (me && me.guest) $('guestName').textContent = me.nickname;
-  $('rLabel').textContent = run.mode === 'daily' ? `Daily #${dayNumber(run.day)}` : run.mode === 'challenge' ? 'Challenge score' : `Score · ${run.rounds} rounds${run.hard ? ' · Hard' : ''}`;
-  if (!skipCount) countUp($('rScore'), run.score);
+  $('rLabel').textContent = practice ? 'Untimed practice' : run.mode === 'daily' ? `Daily #${dayNumber(run.day)}` : run.mode === 'challenge' ? 'Challenge score' : `Score · ${run.rounds} rounds${run.hard ? ' · Hard' : ''}`;
+  if (!skipCount) countUp($('rScore'), practice ? run.correct : run.score);
   $('rCorrect').textContent = `${run.correct}/${run.rounds}`;
   $('rAvg').textContent = run.avgMs ? (run.avgMs / 1000).toFixed(2) + 's' : '–';
   $('rStreak').textContent = run.bestStreak;
-  $('rRank').textContent = run.rank ? `#${run.rank}` : '–';
+  // "This run" placing (out of everyone on that board), not the player's all-time best
+  $('rRank').textContent = run.place ? `#${run.place}` : '–';
+  $('rRankK').textContent = run.place && run.of ? `This run, of ${run.of}` : 'This run';
+  $('rBestRank').hidden = !(run.mode === 'classic' && run.bestRank && run.bestRank !== run.place);
+  $('rBestRank').textContent = `Your best run is #${run.bestRank} on this board`;
+  if (!skipCount && run.saveState) setSave(run, run.saveState);
   const badge = $('rBadge');
   badge.hidden = !badgeText;
   if (badgeText) { badge.className = badgeGood ? 'badge' : 'badge plain'; badge.textContent = badgeText; }
@@ -624,8 +858,9 @@ function renderResults(run, { skipCount = false } = {}) {
   if (!skipCount) renderStrip(run.log);
   const bars = $('rSplitBars'); bars.replaceChildren();
   for (const [k, v, alt] of [['Odd or Even', run.split.parity, false], ['Low or High', run.split.size, true]]) bars.append(meter(k, v[1] ? v[0] / v[1] : 0, `${v[0]}/${v[1]}`, alt));
-  $('challengeBtn').hidden = run.mode !== 'classic' || !run.gameId;
-  $('againBtn').textContent = run.mode === 'classic' ? 'Play again' : 'Play classic';
+  $('challengeBtn').hidden = run.mode !== 'classic' || !run.gameId || !run.posted;
+  $('shareBtn').hidden = practice;
+  $('againBtn').textContent = practice ? 'Practise again' : run.mode === 'classic' ? 'Play again' : 'Play classic';
   renderResultsBoard();
 }
 
@@ -656,14 +891,34 @@ function renderStrip(log) {
   const strip = $('rStrip');
   strip.replaceChildren(...log.map((l, i) => {
     const b = document.createElement('i');
-    const speed = Math.max(0, 1 - l.ms / (l.lim || BASE_LIMIT));
+    const speed = Math.max(0, 1 - l.ms / Math.min(l.lim || BASE_LIMIT, BASE_LIMIT));
     b.style.height = l.ok ? `${30 + speed * 70}%` : '22%';
     if (!l.ok) b.className = 'no';
     b.style.setProperty('--i', i);
     return b;
   }));
-  strip.setAttribute('aria-label', `${log.filter(l => l.ok).length} of ${log.length} answers right`);
+  strip.setAttribute('aria-label', `${log.filter(l => l.ok).length} of ${log.length} answers right. Show every answer below.`);
+  renderReview(log);
 }
+// Every answer, in order: the question, the number, what you pressed and what was right.
+function renderReview(log) {
+  const box = $('rReview');
+  const side = (l, d) => { const t = TYPES[l.type]; if (!t || !d) return '–'; const flipped = l.flip ? (d === 'left' ? 'right' : 'left') : d; return flipped === 'left' ? t.left : t.right; };
+  box.replaceChildren(...log.map((l, i) => {
+    const li = document.createElement('li');
+    li.className = l.ok ? 'ok' : 'no';
+    const t = TYPES[l.type];
+    const q = document.createElement('span'); q.className = 'rv-q';
+    q.textContent = t ? `${i + 1}. ${t.left[0] + t.left.slice(1).toLowerCase()} or ${t.right.toLowerCase()}? ${l.n}${l.form && l.form !== 'digit' ? ` (${l.form})` : ''}${l.flip ? ' · swapped' : ''}` : `${i + 1}.`;
+    const a = document.createElement('span'); a.className = 'rv-a';
+    a.textContent = l.paused ? 'Paused during it' : l.d == null ? 'No answer' : l.early ? `${side(l, l.d)} · too early` : `${side(l, l.d)} · ${(l.ms / 1000).toFixed(2)}s`;
+    const m = document.createElement('span'); m.className = 'rv-m'; m.textContent = l.ok ? '✓' : `✗ ${side(l, l.right)}`;
+    m.setAttribute('aria-label', l.ok ? 'right' : `wrong, answer was ${side(l, l.right)}`);
+    li.append(q, a, m);
+    return li;
+  }));
+}
+$('rStrip').addEventListener('click', () => { const d = $('rReviewBox'); d.open = !d.open; if (d.open) { track('review_open'); d.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); } });
 
 function countUp(el, to) {
   if (reduceMotion.matches || to <= 0) { el.textContent = to.toLocaleString(); return; }
@@ -679,21 +934,31 @@ function countUp(el, to) {
 function goHome() { show('home'); renderAll(); refreshRemote(); }
 
 // ================= home controls =================
-$('playBtn').addEventListener('click', play);
+$('playBtn').addEventListener('click', () => play({ mode: 'classic' }));
 $('howBtn').addEventListener('click', () => startTutorial(hard ? HARD_TUTORIAL : TUTORIAL));
-$('skipBtn').addEventListener('click', () => { store.set(g && g.hardIntro ? 'hardIntroDone' : 'tutorialDone', true); startGame(); });
-$('practiceAgainBtn').addEventListener('click', () => startTutorial(g && g.hardIntro ? HARD_TUTORIAL : TUTORIAL));
-$('readyPlayBtn').addEventListener('click', () => startGame());
-$('againBtn').addEventListener('click', () => startGame());
+$('untimedBtn').addEventListener('click', () => startPractice());
+// Skip and Ready continue to whatever the player came for (their Daily, a friend's challenge, or Classic).
+$('skipBtn').addEventListener('click', () => {
+  if (!g || !g.tutorial) return;
+  store.set(g.hardIntro ? 'hardIntroDone' : 'tutorialDone', true);
+  track('practice_skip');
+  const it = g.intent;
+  if (!g.hardIntro && it) { const needsHard = it.mode === 'challenge' ? !!parseCode(it.code)?.hard : it.mode === 'classic' && hard; if (needsHard) store.set('hardIntroDone', true); }
+  startGame(it || { mode: 'classic' });
+});
+$('practiceAgainBtn').addEventListener('click', () => startTutorial(g && g.hardIntro ? HARD_TUTORIAL : TUTORIAL, g?.intent));
+$('readyPlayBtn').addEventListener('click', () => { const it = g?.intent || { mode: 'classic' }; return g?.hardIntro ? startGame(it) : afterPractice(it); });
+$('againBtn').addEventListener('click', () => (lastRun?.mode === 'practice' ? startPractice() : startGame({ mode: 'classic' })));
 $('homeBtn').addEventListener('click', goHome);
 $('statsBtn').addEventListener('click', () => { show('stats'); renderStats(); });
 $('statsBack').addEventListener('click', goHome);
-$('stPlay').addEventListener('click', play);
+$('stPlay').addEventListener('click', () => play({ mode: 'classic' }));
 
 function renderSetup() {
   for (const b of $('roundsSeg').querySelectorAll('button')) b.setAttribute('aria-pressed', String(+b.dataset.r === rounds));
   for (const b of $('levelSeg').querySelectorAll('button')) b.setAttribute('aria-pressed', String(!!+b.dataset.h === hard));
   $('playBtn').textContent = `Play ${rounds} rounds${hard ? ' · Hard' : ''}`;
+  $('optsSummary').textContent = `${rounds} rounds · ${hard ? 'Hard' : 'Normal'}`;
   $('youBestK').textContent = `Best (${rounds}${hard ? ', Hard' : ''})`;
   $('levelInfo').hidden = !hard;
 }
@@ -709,10 +974,27 @@ let boardView = 'classic', period = 'all';
 let dataState = 'loading';
 
 const myBest = (r, h) => Math.max(0, ...gameHistory.filter(x => x.mode === 'classic' && x.rounds === r && !!x.hard === !!h).map(x => x.score));
+// Local receipts: every finished game goes here at once (id = its server game id, or null for
+// offline games). When the server's list includes it, the server copy replaces it.
 function addLocalHistory(run) {
-  gameHistory = [...gameHistory, { id: null, at: Date.now(), mode: run.mode, rounds: run.rounds, hard: run.hard, day: run.day, score: run.score, correct: run.correct,
-    avgMs: run.avgMs, swMs: run.swMs, repMs: run.repMs, par: run.split.parity, siz: run.split.size, local: true }].slice(-200);
+  gameHistory = [...gameHistory.filter(x => !(run.gameId && x.id === run.gameId)), { id: run.gameId || null, at: Date.now(), mode: run.mode, rounds: run.rounds, hard: run.hard, day: run.day, score: run.score, correct: run.correct,
+    avgMs: run.avgMs, swMs: run.swMs, repMs: run.repMs, swN: run.swN, repN: run.repN, par: run.split.parity, siz: run.split.size, bestStreak: run.bestStreak, local: true }].slice(-300);
   store.set('history', gameHistory);
+}
+// Lifetime totals: the server's count of every posted game, plus games only this device has
+// seen yet. Never lower than what the local list alone shows.
+let serverLifetime = store.get('lifetime', null);
+function lifetime() {
+  const local = statsFromGames(statGames());
+  if (!serverLifetime) return local;
+  const extra = statsFromGames(statGames().filter(x => x.local && !x.posted));
+  const sum = { ...serverLifetime };
+  for (const k of ['games', 'totalScore', 'perfect', 'hardPerfect', 'marathon', 'challenges']) sum[k] = (serverLifetime[k] || 0) + (extra[k] || 0);
+  sum.fastest = [serverLifetime.fastest, extra.fastest].filter(v => v != null).reduce((m, v) => Math.min(m, v), Infinity);
+  if (sum.fastest === Infinity) sum.fastest = null;
+  sum.bestStreak = Math.max(serverLifetime.bestStreak || 0, local.bestStreak || 0);
+  for (const k of ['games', 'totalScore', 'perfect', 'hardPerfect', 'marathon', 'challenges']) sum[k] = Math.max(sum[k], local[k] || 0);
+  return sum;
 }
 
 function dailyHistory() {
@@ -724,28 +1006,34 @@ function dailyHistory() {
 const streakNow = (hist = dailyHistory()) => streakInfo(Object.keys(hist).filter(k => hist[k] != null), todayKey);
 function dayStreak(hist) { return streakNow(hist).streak; }
 
+// Each answer is filed under the board it was asked for, so a slow answer for 30 rounds can't
+// land under the 20-round heading after the player switched.
+let boardsSeq = 0;
 async function refreshBoards() {
   renderAll();
   if (!online) return;
+  const r0 = rounds, h0 = hard, day0 = todayKey, seq = ++boardsSeq;
   try {
-    const r = await api('boards', { rounds, hard, day: todayKey });
-    boards[modeKey(rounds, hard)] = { all: r.all, week: r.week };
-    boards['daily:' + todayKey] = r.daily;
+    const r = await api('boards', { rounds: r0, hard: h0, day: day0 });
+    boards[modeKey(r0, h0)] = { all: r.all, week: r.week };
+    boards['daily:' + day0] = r.daily;
     store.set('cache.boards', boards);
-    dataState = 'ready';
-  } catch (e) { dataState = e.offline ? 'offline' : 'error'; }
+    if (seq === boardsSeq) dataState = 'ready';
+  } catch (e) { if (seq === boardsSeq) dataState = e.offline ? 'offline' : 'error'; }
   renderAll();
 }
 
 async function refreshRemote() {
   if (!online) { dataState = 'offline'; renderAll(); return; }
-  const sent = await pending.flush();
-  if (sent.length) toast(`Posted ${sent.length} game${sent.length > 1 ? 's' : ''} from when you were offline`);
+  await flushOutbox();
   const jobs = [refreshBoards()];
   if (getToken()) jobs.push(api('myStats').then(r => {
-    const local = gameHistory.filter(x => x.local);
+    const serverIds = new Set(r.games.map(x => x.id));
+    // keep local receipts the server doesn't list yet (offline games, games still waiting to post)
+    const local = gameHistory.filter(x => x.local && !(x.id && serverIds.has(x.id)) && !(x.posted && x.at < (r.games[0]?.at ?? 0)));
     gameHistory = [...r.games, ...local].sort((a, b) => a.at - b.at);
     store.set('history', gameHistory);
+    if (r.lifetime) { serverLifetime = r.lifetime; store.set('lifetime', serverLifetime); }
   }).catch(e => { if (e.status === 401) { setToken(null); me = null; store.set('me', null); } }));
   if (pendingChallenge) jobs.push(loadChallenge(pendingChallenge.code));
   if (lastRun?.mode === 'challenge') jobs.push(loadChallenge(lastRun.code));
@@ -792,6 +1080,13 @@ function renderList(olId, emptyId, data, max = 10) {
     const pts = document.createElement('span'); pts.className = 'pts'; pts.textContent = (r.score || 0).toLocaleString();
     li.style.setProperty('--i', i);
     li.append(rk, av, who, pts);
+    if (!mine && r.playerId && getToken()) {
+      const more = document.createElement('button'); more.type = 'button'; more.className = 'row-more';
+      more.setAttribute('aria-label', `Report ${r.nickname || 'this player'}`); more.title = 'Report';
+      more.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 21V4h11l-1.5 4L16 12H5"/></svg>';
+      more.addEventListener('click', e => { e.stopPropagation(); openReport(r); });
+      li.append(more);
+    }
     return li;
   }));
   if (!empty) return;
@@ -808,10 +1103,16 @@ function renderAll() {
   if (!$('stats').hidden) renderStats();
 }
 function renderNet() {
-  const n = pending.list().length;
-  const note = !online ? 'You’re offline. Classic games still work, but their scores stay on this device.' + (n ? ` ${n} finished game${n > 1 ? 's' : ''} will post when you’re back.` : '') : '';
+  const n = outbox.pending().length, bad = outbox.failed();
+  let note = '';
+  if (!online) note = 'You’re offline. Classic games still work and are saved on this device.' + (n ? ` ${n} finished game${n > 1 ? 's' : ''} will post when you’re back.` : '');
+  else if (n) note = `${n} finished game${n > 1 ? 's are' : ' is'} saved on this device and waiting to post. We’ll keep trying.`;
   $('netNote').textContent = note; $('netNote').hidden = !note;
+  const att = $('attnNote');
+  att.hidden = !bad.length;
+  if (bad.length) $('attnText').textContent = `${bad.length} game${bad.length > 1 ? 's' : ''} couldn’t be posted: ${bad[0].error || 'it couldn’t be verified'}.`;
 }
+$('attnDismiss').addEventListener('click', () => { outbox.failed().forEach(x => outbox.remove(x.gameId)); renderNet(); });
 function renderHomeBoard() {
   const data = boardData(boardView);
   $('boardSub').textContent = data.sub;
@@ -832,18 +1133,20 @@ for (const [id, p] of [['tabAll', 'all'], ['tabWeek', 'week']]) {
 }
 function renderResultsBoard() {
   if (!lastRun) return;
+  $('rBoardPanel').hidden = lastRun.mode === 'practice';
+  if (lastRun.mode === 'practice') return;
   const view = lastRun.mode;
   const data = boardData(view, lastRun.rounds, lastRun.hard);
   $('rBoardTitle').textContent = view === 'challenge' ? 'Challenge results' : view === 'daily' ? 'Today’s leaderboard' : 'Leaderboard';
   $('boardSub2').textContent = data.sub;
   renderList('board2', 'boardEmpty2', data, 5);
-  if (!lastRun.gameId) { $('boardEmpty2').hidden = false; $('boardEmpty2').textContent = 'This was an offline game, so it isn’t on the leaderboard.'; }
+  if (!lastRun.gameId) { $('boardEmpty2').hidden = false; $('boardEmpty2').textContent = lastRun.mode === 'practice' ? 'Practice games aren’t on the leaderboard.' : 'This was an offline game, so it isn’t on the leaderboard.'; }
 }
-const totalScore = () => statGames().reduce((a, g2) => a + (g2.score || 0), 0);
-const earnedBadges = () => new Set(badgeState(statGames(), todayKey).filter(b => b.earned).map(b => b.id));
+const earnedBadges = () => new Set(badgesFromStats(lifetime()).filter(b => b.earned).map(b => b.id));
 
 function renderYou() {
-  const L = levelInfo(totalScore());
+  const lt = lifetime();
+  const L = levelInfo(lt.totalScore);
   $('levelName').textContent = `Level ${L.level} · ${L.title}`;
   $('levelXp').textContent = `${L.into.toLocaleString()} / ${L.need.toLocaleString()} XP`;
   $('levelFill').style.width = `${Math.round(L.progress * 100)}%`;
@@ -853,7 +1156,7 @@ function renderYou() {
   const best = Math.max(localBest(), myBest(rounds, hard));
   $('youBest').textContent = best ? best.toLocaleString() : '–';
   $('youRank').textContent = idx >= 0 ? `#${idx + 1}` : '–';
-  $('youPlays').textContent = statGames().length || localPlays;
+  $('youPlays').textContent = Math.max(lt.games, statGames().length) || localPlays;
   // returning players get a short greeting instead of the full intro and rules
   const returning = statGames().length > 0;
   document.body.classList.toggle('returning', returning);
@@ -862,11 +1165,12 @@ function renderYou() {
 }
 
 // ---------- daily ----------
+// A new Daily opens at midnight UTC for everyone.
 function untilMidnight() {
-  const now = new Date(), m = new Date(now); m.setHours(24, 0, 0, 0);
-  const mins = Math.max(1, Math.round((m - now) / 60000));
+  const mins = Math.max(1, Math.round(msToNextUtcDay() / 60000));
   return mins >= 60 ? `${Math.floor(mins / 60)}h ${mins % 60}m` : `${mins}m`;
 }
+const nextDailyLocalTime = () => new Date(Date.now() + msToNextUtcDay()).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
 function dailyProgress() {
   for (let i = 0; i < localStorage.length; i++) {
     const k = localStorage.key(i);
@@ -877,7 +1181,7 @@ function dailyProgress() {
   return null;
 }
 function renderDaily() {
-  const k = dayKey();
+  const k = utcDayKey();
   if (k !== todayKey) { todayKey = k; refreshBoards(); }
   $('dailyTitle').textContent = `Daily #${dayNumber(todayKey)}`;
   $('dailyDate').textContent = keyToDate(todayKey).toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' });
@@ -911,21 +1215,27 @@ function renderDaily() {
     const { list } = boardData('daily');
     const idx = me ? list.findIndex(x => x.playerId === me.id) : -1;
     $('dailyRank').textContent = idx >= 0 ? `#${idx + 1} of ${list.length}` : '–';
+    $('dailyRankK').textContent = 'This run, today';
     $('dailyNext').textContent = untilMidnight();
+    $('dailyNextK').textContent = `New one at ${nextDailyLocalTime()}`;
   }
+  $('dailyResets').textContent = `A new Daily opens every day at ${nextDailyLocalTime()} your time.`;
   $('dailyRemindBtn').hidden = mine == null || !remindersPossible() || store.get('reminders', false);
 }
 const Replay = prog => (prog.events || []).filter(e => e.o === 'a').length;
 setInterval(() => { if (!$('home').hidden) renderDaily(); }, 30000);
 $('dailyBtn').addEventListener('click', () => {
   if (dailyHistory()[todayKey] != null) { renderDaily(); return; }
-  withPlayer(o => (o && o.offline ? toast('The Daily needs a nickname and a connection.') : startGame({ mode: 'daily' })));
+  if (!online) { toast('You’re offline. The Daily needs a connection.'); return; }
+  track('daily_open');
+  // first-timers get the short warm-up first, then go straight into the Daily
+  play({ mode: 'daily' });
 });
 $('dailyShareBtn').addEventListener('click', () => {
   const hist = dailyHistory();
   const fromHist = gameHistory.slice().reverse().find(x => x.mode === 'daily' && x.day === todayKey);
   const run = (lastRun && lastRun.mode === 'daily' && lastRun.day === todayKey) ? lastRun : {
-    mode: 'daily', gameId: fromHist?.id || null, rounds: DAILY_ROUNDS, hard: false, day: todayKey, score: hist[todayKey] || 0,
+    mode: 'daily', gameId: fromHist?.id || null, posted: !!fromHist && (!fromHist.local || !!fromHist.posted), rounds: DAILY_ROUNDS, hard: false, day: todayKey, score: hist[todayKey] || 0,
     correct: fromHist?.correct ?? 0, avgMs: fromHist?.avgMs ?? null, bestStreak: 0, date: new Date(), dayStreak: dayStreak(hist),
   };
   run.dayStreak = dayStreak(hist);
@@ -968,12 +1278,9 @@ function renderChallengeCard() {
 }
 $('cAccept').addEventListener('click', () => {
   const pc = pendingChallenge; if (!pc) return;
-  withPlayer(o => {
-    if (o && o.offline) { toast('Challenges need a nickname and a connection.'); return; }
-    if (needsTutorial()) { startTutorial(); return; }
-    if (pc.hard && !store.get('hardIntroDone', false)) { startTutorial(HARD_TUTORIAL); return; }
-    startGame({ mode: 'challenge', code: pc.code });
-  });
+  if (!online) { toast('You’re offline. Challenges need a connection.'); return; }
+  // practice (and the Hard intro) first if needed; Skip or Ready then start this exact challenge
+  play({ mode: 'challenge', code: pc.code });
 });
 $('cDismiss').addEventListener('click', () => { challengeDismissed = true; window.history.replaceState(null, '', location.pathname); renderChallengeCard(); });
 $('challengeBtn').addEventListener('click', async () => {
@@ -994,11 +1301,12 @@ const statGames = () => gameHistory.filter((x, i, a) => !(x.mode === 'challenge'
 function renderStats() {
   $('pName').textContent = me ? me.nickname + (me.guest ? ' (guest)' : '') : 'Not set';
   $('renameBtn').textContent = me && !me.guest ? 'Change' : 'Pick one';
-  const lv = levelInfo(totalScore());
+  const lt = lifetime();
+  const lv = levelInfo(lt.totalScore);
   $('stLevelSub').textContent = `${lv.level} · ${lv.title}`;
   $('stLevelFill').style.width = `${Math.round(lv.progress * 100)}%`;
   $('stLevelNext').textContent = `${(lv.need - lv.into).toLocaleString()} XP to level ${lv.level + 1}. Every 10 points you score is 1 XP.`;
-  const bs = badgeState(statGames(), todayKey);
+  const bs = badgesFromStats(lt);
   $('stBadgeCount').textContent = `${bs.filter(b => b.earned).length} of ${bs.length}`;
   $('stBadges').replaceChildren(...bs.map(b => {
     const d = document.createElement('div'); d.className = 'badge-item' + (b.earned ? '' : ' locked');
@@ -1015,8 +1323,8 @@ function renderStats() {
   if (!has) return;
   const totalQ = games.reduce((a, x) => a + x.rounds, 0), totalC = games.reduce((a, x) => a + x.correct, 0);
   const avgAll = mean(games.filter(x => x.avgMs).map(x => x.avgMs));
-  const tiles = [[games.length, 'Games played'], [`${Math.round((totalC / Math.max(1, totalQ)) * 100)}%`, 'Accuracy'],
-    [avgAll ? (avgAll / 1000).toFixed(2) + 's' : '–', 'Average answer'], [dayStreak(dailyHistory()), 'Daily streak']];
+  const tiles = [[Math.max(lt.games, games.length), 'Games played'], [`${Math.round((totalC / Math.max(1, totalQ)) * 100)}%`, 'Accuracy'],
+    [avgAll ? (avgAll / 1000).toFixed(2) + 's' : '–', 'Avg (correct answers)'], [dayStreak(dailyHistory()), 'Daily streak']];
   $('stTiles').replaceChildren(...tiles.map(([v, k]) => { const d = document.createElement('div'); const b = document.createElement('b'); b.textContent = v; const s = document.createElement('span'); s.textContent = k; d.append(b, s); return d; }));
 
   const pts = games.slice(-30).map(x => x.score / x.rounds);
@@ -1046,10 +1354,18 @@ function renderStats() {
   } else {
     const recent = withBoth.slice(-10);
     const sw = mean(recent.map(x => x.swMs)), rep = mean(recent.map(x => x.repMs)), cost = Math.round(sw - rep);
+    const counted = recent.filter(x => x.swN != null);
+    const nSw = counted.reduce((a, x) => a + x.swN, 0), nRep = counted.reduce((a, x) => a + x.repN, 0);
     const big = document.createElement('div'); big.className = 'switch-big'; big.textContent = `${cost > 0 ? '+' : ''}${cost} ms`;
     const note = document.createElement('p'); note.className = 'switch-note';
-    note.textContent = cost > 0 ? 'slower right after the question changes (last 10 games)' : 'no slowdown after a switch. Very sharp.';
+    note.textContent = (cost > 0 ? 'slower right after the question changes' : 'no slowdown after a switch')
+      + ` · last ${recent.length} game${recent.length > 1 ? 's' : ''}, correct answers only`;
     box.append(big, note);
+    const sample = document.createElement('p'); sample.className = 'switch-note muted';
+    sample.textContent = counted.length === recent.length
+      ? `Based on ${nSw} answers after a switch and ${nRep} after a repeat.${nSw + nRep < 60 ? ' A small sample: it will settle as you play more.' : ''}`
+      : recent.length < 5 ? 'A small sample: it will settle as you play more.' : '';
+    if (sample.textContent) box.append(sample);
     if (withBoth.length >= 12) {
       const first = withBoth.slice(0, 10), was = Math.round(mean(first.map(x => x.swMs)) - mean(first.map(x => x.repMs)));
       const t = document.createElement('p'); t.className = 'switch-note' + (cost < was ? ' good' : '');
@@ -1076,11 +1392,19 @@ $('saveName').addEventListener('submit', async e => {
     me = r.player; store.set('me', me);
     $('saveName').hidden = true; err.hidden = true;
     toast(`Saved. You’re on the leaderboard as ${me.nickname}`);
+    track('name_saved');
     await refreshRemote();
   } catch (ex) { err.textContent = ex.offline ? 'You’re offline. Try again when you’re connected.' : ex.message; err.hidden = false; }
   finally { $('saveNameBtn').disabled = false; }
 });
 $('youNameBtn').addEventListener('click', () => askNickname(null, { rename: true }));
+// Switching to another player: forget everything that belonged to the previous one on this
+// device (history, bests, streak, queued games, cached boards). Settings stay.
+const KEEP_KEYS = ['theme', 'sound', 'size', 'tutorialDone', 'hardIntroDone', 'rounds', 'hard', 'playerToken'];
+function wipePlayerData() {
+  try { Object.keys(localStorage).filter(k => k.startsWith('lor.') && !KEEP_KEYS.includes(k.slice(4))).forEach(k => localStorage.removeItem(k)); } catch {}
+  gameHistory = []; serverLifetime = null; boards = {}; localPlays = 0; lastRun = null;
+}
 $('deleteMeBtn').addEventListener('click', async () => {
   const b = $('deleteMeBtn');
   if (!getToken()) { toast('There’s no player on this device.'); return; }
@@ -1104,9 +1428,14 @@ $('copyCodeBtn').addEventListener('click', async () => {
 $('useCodeBtn').addEventListener('click', async () => {
   const code = $('codeInput').value.trim();
   if (!/^[0-9a-f]{64}$/.test(code)) { toast('That doesn’t look like a player code.'); return; }
-  const old = getToken();
+  const old = getToken(), oldMe = me;
   setToken(code);
-  try { const r = await api('me'); me = r.player; store.set('me', me); $('codeInput').value = ''; toast(`Signed in as ${me.nickname}`); await refreshRemote(); }
+  try {
+    const r = await api('me');
+    if (!oldMe || oldMe.id !== r.player.id) wipePlayerData();
+    me = r.player; store.set('me', me); $('codeInput').value = '';
+    toast(`Signed in as ${me.nickname}`); await refreshRemote();
+  }
   catch (e) { setToken(old); toast(e.status === 401 ? 'That code didn’t match a player.' : e.message); }
 });
 
@@ -1115,7 +1444,7 @@ const SITE = location.origin;
 let cardBlob = null, cardUrl = null, shareKind = 'score', shareRun = null, shareOpener = null;
 // Each verified game and each challenge gets its own link, whose preview shows that exact score card.
 const shareLink = () => (shareKind === 'challenge' ? `${SITE}/c/${shareRun.code}`
-  : shareRun.gameId ? `${SITE}/s/${shareRun.gameId}` : SITE);
+  : shareRun.gameId && shareRun.posted ? `${SITE}/s/${shareRun.gameId}` : SITE);
 function shareText(run) {
   const sc = run.score.toLocaleString();
   if (shareKind === 'challenge') return `I scored ${sc} on these exact ${run.rounds} questions${run.hard ? ' on Hard' : ''} in Left or Right. Same questions, one try. Can you beat me?`;
@@ -1187,11 +1516,14 @@ async function openShare(kind, run) {
   $('shareTitle').textContent = kind === 'challenge' ? 'Challenge a friend' : 'Share your score';
   $('shareNote').textContent = kind === 'challenge'
     ? 'Your friend gets the exact same questions and one try. Their result shows up on your challenge.'
-    : shareRun.gameId
-      ? 'The link shows your score card as its preview on LinkedIn, X, WhatsApp and more. Or save the image to post it yourself.'
-      : 'This game wasn’t posted, so the link shows the game’s own preview. Save the image to post your score.';
+    : shareRun.gameId && shareRun.posted
+      ? 'The link shows this score card as its preview on LinkedIn, X, WhatsApp and more. Or save the image to post it yourself.'
+      : shareRun.gameId
+        ? 'This score isn’t posted yet, so the link goes to the game itself. Save the image to post your score now, or share again once it’s posted.'
+        : 'This game wasn’t posted, so the link goes to the game itself. Save the image to post your score.';
   $('copyTextLabel').textContent = kind === 'challenge' ? 'Copy invite' : 'Copy text';
-  $('shareScrim').hidden = false;
+  openDialog($('shareScrim'), $('shareClose'));
+  track('share_open');
   setSocialLinks(run);
   $('cardImg').removeAttribute('src');
   cardBlob = await drawCard(run);
@@ -1200,17 +1532,49 @@ async function openShare(kind, run) {
   $('cardImg').src = cardUrl;
   $('saveImgLabel').textContent = canNativeShare() ? 'Share image' : 'Save image';
   $('copyImgBtn').hidden = !(window.ClipboardItem && navigator.clipboard && navigator.clipboard.write);
-  focusKbd($('shareClose'));
 }
-function closeShare() { $('shareScrim').hidden = true; shareOpener?.focus?.(); }
+function closeShare() { closeDialog($('shareScrim'), shareOpener); }
 $('shareBtn').addEventListener('click', () => openShare('score', lastRun));
 $('shareClose').addEventListener('click', closeShare);
 $('shareScrim').addEventListener('click', e => { if (e.target === $('shareScrim')) closeShare(); });
-for (const id of ['nickScrim', 'iosScrim']) $(id).addEventListener('click', e => { if (e.target === $(id)) $(id).hidden = true; });
+for (const id of ['nickScrim', 'iosScrim', 'reportScrim']) $(id).addEventListener('click', e => { if (e.target === $(id)) closeDialog($(id)); });
 document.addEventListener('keydown', e => {
   if (e.key !== 'Escape') return;
   if (!$('shareScrim').hidden) closeShare();
-  for (const id of ['nickScrim', 'iosScrim']) $(id).hidden = true;
+  for (const id of ['nickScrim', 'iosScrim', 'reportScrim']) if (!$(id).hidden) closeDialog($(id));
+});
+// keep Tab inside the open sheet
+document.addEventListener('keydown', e => {
+  if (e.key !== 'Tab' || !dialogStack.length) return;
+  const d = dialogStack[dialogStack.length - 1];
+  const f = [...d.querySelectorAll('button, a[href], input, select, textarea, summary, [tabindex]:not([tabindex="-1"])')].filter(x => !x.disabled && !x.hidden && x.offsetParent !== null);
+  if (!f.length) return;
+  const first = f[0], last = f[f.length - 1];
+  if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+  else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+  else if (!d.contains(document.activeElement)) { e.preventDefault(); first.focus(); }
+});
+
+// ================= report a player =================
+let reportTarget = null;
+function openReport(row) {
+  reportTarget = row;
+  $('reportWho').textContent = row.nickname || 'this player';
+  $('reportForm').reset(); $('reportError').hidden = true;
+  openDialog($('reportScrim'));
+}
+$('reportClose').addEventListener('click', () => closeDialog($('reportScrim')));
+$('reportForm').addEventListener('submit', async e => {
+  e.preventDefault();
+  const reason = new FormData($('reportForm')).get('reason');
+  if (!reason) { $('reportError').textContent = 'Pick a reason.'; $('reportError').hidden = false; return; }
+  $('reportSend').disabled = true;
+  try {
+    await api('report', { playerId: reportTarget.playerId, reason, note: $('reportNote').value });
+    closeDialog($('reportScrim'));
+    toast('Thanks. We’ll take a look.');
+  } catch (ex) { $('reportError').textContent = ex.offline ? 'You’re offline. Try again when you’re connected.' : ex.message; $('reportError').hidden = false; }
+  finally { $('reportSend').disabled = false; }
 });
 $('saveImgBtn').addEventListener('click', async () => {
   if (!cardBlob) return;
@@ -1255,8 +1619,10 @@ async function enableReminders() {
     const reg = await navigator.serviceWorker.ready;
     const { key } = await api('pushKey');
     const sub = (await reg.pushManager.getSubscription()) || await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64ToBytes(key) });
-    await api('pushSubscribe', { subscription: sub.toJSON(), tzOffsetMin: -new Date().getTimezoneOffset(), hour: 18 });
+    let tz = null; try { tz = Intl.DateTimeFormat().resolvedOptions().timeZone || null; } catch {}
+    await api('pushSubscribe', { subscription: sub.toJSON(), tz, tzOffsetMin: -new Date().getTimezoneOffset(), hour: 18 });
     store.set('reminders', true);
+    track('reminder_on');
     toast('Done. We’ll remind you at 6 pm on days you haven’t played the Daily.');
   } catch (e) { toast(e.offline ? 'You’re offline. Try again when you’re connected.' : 'Couldn’t turn on reminders. Try again later.'); report('push: ' + (e.message || e)); }
   renderReminder(); renderDaily();
@@ -1279,13 +1645,13 @@ let installPrompt = null;
 const isStandalone = () => matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
 const isIOS = () => /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 window.addEventListener('beforeinstallprompt', e => { e.preventDefault(); installPrompt = e; $('installBtn').hidden = isStandalone(); });
-window.addEventListener('appinstalled', () => { installPrompt = null; $('installBtn').hidden = true; toast('Installed. Find Left or Right on your home screen.'); });
+window.addEventListener('appinstalled', () => { installPrompt = null; $('installBtn').hidden = true; track('install'); toast('Installed. Find Left or Right on your home screen.'); });
 if (isIOS() && !isStandalone()) $('installBtn').hidden = false;
 $('installBtn').addEventListener('click', async () => {
   if (installPrompt) { installPrompt.prompt(); const { outcome } = await installPrompt.userChoice.catch(() => ({})); if (outcome === 'accepted') $('installBtn').hidden = true; installPrompt = null; return; }
-  if (isIOS()) $('iosScrim').hidden = false;
+  if (isIOS()) openDialog($('iosScrim'));
 });
-$('iosClose').addEventListener('click', () => { $('iosScrim').hidden = true; });
+$('iosClose').addEventListener('click', () => closeDialog($('iosScrim')));
 
 if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) {
   navigator.serviceWorker?.register('/sw.js').catch(() => {});
@@ -1293,14 +1659,43 @@ if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.
 
 // ================= connectivity & boot =================
 window.addEventListener('online', () => { online = true; refreshRemote(); });
+// try the outbox again whenever the app comes back to the front
+addEventListener('visibilitychange', () => { if (!document.hidden && online && outbox.pending().length) flushOutbox({ force: true }).then(renderAll); });
 window.addEventListener('offline', () => { online = false; dataState = 'offline'; renderAll(); });
+
+// ---------- a shared score link (/s/<id> lands here as /?s=<id>) ----------
+async function showLanding(id) {
+  try {
+    const d = await api('share', { gameId: id });
+    const what = d.mode === 'daily' ? `Daily #${dayNumber(d.day)}` : d.mode === 'challenge' ? 'a challenge' : `${d.rounds} rounds${d.hard ? ' on Hard' : ''}`;
+    $('landingTitle').textContent = `${d.nickname} scored ${Number(d.score).toLocaleString()} on ${what}.`;
+    $('landingSub').textContent = `${d.correct}/${d.rounds} correct${d.avgMs ? ` · ${(d.avgMs / 1000).toFixed(2)}s average` : ''}${d.rank && d.of ? ` · #${d.rank} of ${d.of}` : ''}. Checked by the game server.`;
+    const todays = d.mode === 'daily' && d.day === todayKey && dailyHistory()[todayKey] == null;
+    landingIntent = todays ? { mode: 'daily' } : { mode: 'classic' };
+    if (!todays && ROUND_OPTIONS.includes(d.rounds) && d.mode === 'classic') { rounds = d.rounds; hard = !!d.hard; renderSetup(); }
+    $('landingPlay').textContent = todays ? 'Play today’s Daily' : `Play ${rounds} rounds${hard ? ' · Hard' : ''}`;
+    $('landingCard').hidden = false;
+    track('landing_score');
+  } catch { /* an unknown or removed game: just show the normal home screen */ }
+}
+let landingIntent = { mode: 'classic' };
+$('landingPlay').addEventListener('click', () => { $('landingCard').hidden = true; play(landingIntent); });
+$('landingClose').addEventListener('click', () => { $('landingCard').hidden = true; });
 
 async function boot() {
   goHome();
-  if (new URLSearchParams(location.search).get('go') === 'daily') setTimeout(() => $('dailyBtn').click(), 300);
+  track('visit');
+  if (pendingChallenge) track('challenge_open');
+  const qs = new URLSearchParams(location.search);
+  // from a reminder: show the Daily card, never start it without a tap
+  if (qs.get('view') === 'daily' || qs.get('go') === 'daily') setTimeout(() => { $('dailyCard').scrollIntoView({ block: 'center' }); $('dailyCard').classList.add('flash'); focusKbd($('dailyBtn')); }, 300);
+  const sid = qs.get('s');
+  if (sid && /^[0-9a-f-]{36}$/i.test(sid)) showLanding(sid);
+  if (qs.toString()) history.replaceState(null, '', location.pathname + location.hash);
   if (getToken() && online) {
     try { const r = await api('me'); me = r.player; store.set('me', me); renderAll(); }
     catch (e) { if (e.status === 401) { setToken(null); me = null; store.set('me', null); } }
   }
+  if (online && outbox.pending().length) flushOutbox({ force: true }).then(renderAll);
 }
 boot();

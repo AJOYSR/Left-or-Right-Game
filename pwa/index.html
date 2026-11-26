@@ -30,9 +30,8 @@
 <link rel="preload" href="/fonts/inter-latin.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="/fonts/bricolage-grotesque-latin.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="/fonts/fonts.css">
-<link rel="stylesheet" href="/styles.css">
-<script type="module" src="/src/main.js"></script>
-<script defer src="/_vercel/insights/script.js"></script>
+<link rel="stylesheet" href="/styles.css?v=11">
+<script type="module" src="/src/main.js?v=11"></script>
 </head>
 <body>
 <div class="app">
@@ -40,7 +39,7 @@
   <!-- HOME -->
   <section class="screen" id="home">
     <header class="bar">
-      <div class="brand"><span class="brand-mark"><i></i><i></i></span>Left or Right</div>
+      <div class="brand"><span class="brand-mark"><i></i><i></i></span><span class="brand-name">Left or Right</span></div>
       <div class="bar-btns">
       <button class="icon-btn install-btn" id="installBtn" aria-label="Install the app" title="Install the app" hidden>
         <svg viewBox="0 0 24 24"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg>
@@ -66,6 +65,14 @@
 
     <div class="scroll">
       <div class="net-note" id="netNote" role="status" hidden></div>
+      <div class="net-note attn" id="attnNote" role="alert" hidden><span id="attnText"></span> <button class="link" id="attnDismiss" type="button">Dismiss</button></div>
+
+      <div class="panel landing-card" id="landingCard" hidden>
+        <div class="panel-head"><div class="eyebrow">A shared score</div><button class="icon-btn small" id="landingClose" type="button" aria-label="Close"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button></div>
+        <h2 id="landingTitle">Someone scored 0.</h2>
+        <p class="card-sub" id="landingSub"></p>
+        <button class="cta" id="landingPlay" type="button">Play</button>
+      </div>
       <div class="hero">
         <h1 id="heroTitle">Odd or even. Low or high. Three seconds.</h1>
         <p id="heroSub">A number from 1 to 9 appears, never 5. Answer the question before the ring runs out. Faster answers and longer streaks score more.</p>
@@ -96,14 +103,14 @@
         </div>
         <div class="week" id="dailyWeek" aria-label="Daily challenges played this week"></div>
         <div id="dailyPlay">
-          <p class="card-sub">The same 20 questions for everyone today. One try, so make it count.</p>
+          <p class="card-sub">The same 20 questions for everyone today. One try, so make it count. <span id="dailyResets"></span></p>
           <button class="cta" id="dailyBtn">Play today’s challenge</button>
         </div>
         <div id="dailyDone" hidden>
           <div class="daily-result">
             <div><b id="dailyScore">0</b><span>Your score</span></div>
-            <div><b id="dailyRank">–</b><span>Today’s rank</span></div>
-            <div><b id="dailyNext">–</b><span>Next challenge</span></div>
+            <div><b id="dailyRank">–</b><span id="dailyRankK">Today’s rank</span></div>
+            <div><b id="dailyNext">–</b><span id="dailyNextK">Next challenge</span></div>
           </div>
           <button class="ghost share-btn" id="dailyRemindBtn" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 8a6 6 0 1 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.9 1.9 0 0 0 3.4 0"/></svg> Remind me tomorrow</button>
           <button class="ghost share-btn" id="dailyShareBtn">
@@ -124,6 +131,7 @@
           <div class="row"><span class="chip l">← LOW</span><span class="nums">1 2 3 4</span></div>
           <div class="row"><span class="chip r">HIGH →</span><span class="nums">6 7 8 9</span></div>
         </div>
+        <p class="rules-note">Answers in the first 0.15 s count as guesses (wrong). Pausing between questions is free; pausing while a number is showing counts that one as missed.</p>
       </div>
 
       <div class="panel" id="youPanel">
@@ -134,7 +142,7 @@
         </div>
         <div class="you-row">
           <div class="you-stat"><div class="v" id="youBest">–</div><div class="k" id="youBestK">Best score</div></div>
-          <div class="you-stat"><div class="v" id="youRank">–</div><div class="k">Rank</div></div>
+          <div class="you-stat"><div class="v" id="youRank">–</div><div class="k">Best rank</div></div>
           <div class="you-stat"><div class="v" id="youPlays">0</div><div class="k">Games played</div></div>
         </div>
       </div>
@@ -157,27 +165,30 @@
     </div>
 
     <div class="dock">
-    <div class="setups">
-    <div class="setup">
-      <span class="setup-label sr-only" id="roundsLabel">Rounds</span>
-      <div class="seg seg-lg" role="group" aria-labelledby="roundsLabel" id="roundsSeg">
-        <button data-r="15" aria-pressed="false">15</button>
-        <button data-r="20" aria-pressed="true">20</button>
-        <button data-r="30" aria-pressed="false">30</button>
-        <button data-r="50" aria-pressed="false">50</button>
-      </div>
-    </div>
-    <div class="setup">
-      <span class="setup-label sr-only" id="levelLabel">Level</span>
-      <div class="seg seg-lg" role="group" aria-labelledby="levelLabel" id="levelSeg">
-        <button data-h="0" aria-pressed="true">Normal</button>
-        <button data-h="1" aria-pressed="false">Hard</button>
-      </div>
-    </div>
-    </div>
-    <p class="level-info" id="levelInfo" hidden>Hard: the timer shrinks to 1.5 s, sides sometimes swap, and numbers can show as words or dots.</p>
     <button class="cta" id="playBtn">Play 20 rounds</button>
-    <div class="hint"><button class="link" id="howBtn">How to play</button> · <a class="link" href="/privacy">Privacy</a><span class="kbd-only"> · Play with <kbd>←</kbd> <kbd>→</kbd> or <kbd>A</kbd> <kbd>D</kbd></span></div>
+    <details class="opts" id="optsBox">
+      <summary><span class="opts-k">Game</span> <span id="optsSummary">20 rounds · Normal</span> <span class="opts-change">Change</span></summary>
+      <div class="setups">
+      <div class="setup">
+        <span class="setup-label sr-only" id="roundsLabel">Rounds</span>
+        <div class="seg seg-lg" role="group" aria-labelledby="roundsLabel" id="roundsSeg">
+          <button data-r="15" aria-pressed="false">15</button>
+          <button data-r="20" aria-pressed="true">20</button>
+          <button data-r="30" aria-pressed="false">30</button>
+          <button data-r="50" aria-pressed="false">50</button>
+        </div>
+      </div>
+      <div class="setup">
+        <span class="setup-label sr-only" id="levelLabel">Level</span>
+        <div class="seg seg-lg" role="group" aria-labelledby="levelLabel" id="levelSeg">
+          <button data-h="0" aria-pressed="true">Normal</button>
+          <button data-h="1" aria-pressed="false">Hard</button>
+        </div>
+      </div>
+      </div>
+      <p class="level-info" id="levelInfo" hidden>Hard: the timer shrinks to 1.5 s; from a quarter of the way in, numbers can show as words or dots; from halfway, the sides sometimes swap.</p>
+    </details>
+    <div class="hint"><button class="link" id="howBtn">How to play</button> · <button class="link" id="untimedBtn">Untimed practice</button> · <a class="link" href="/privacy">Privacy</a><span class="kbd-only"> · <kbd>←</kbd> <kbd>→</kbd></span></div>
     </div>
   </section>
 
@@ -207,7 +218,7 @@
           <circle class="track" cx="50" cy="50" r="46"/>
           <circle class="ring" id="ring" cx="50" cy="50" r="46"/>
         </svg>
-        <div class="number" id="num" aria-live="polite">6</div>
+        <div class="number" id="num">6</div>
       </div>
       <div class="verdict" id="verdict"></div>
       <div class="coach" id="coach" hidden></div>
@@ -232,7 +243,7 @@
           <div class="pause-stats">
             <div><b id="pRound">1/20</b><span>Round</span></div>
             <div><b id="pScore">0</b><span>Score</span></div>
-            <div><b id="pLeft">3</b><span>Pauses left</span></div>
+            <div><b id="pLeft">0</b><span id="pLeftK">Pauses</span></div>
           </div>
           <div class="pause-rules" id="pauseRules">
             <span><span class="chip l">← ODD</span> <span class="chip r">EVEN →</span></span>
@@ -257,8 +268,8 @@
     </div>
 
     <div class="pads">
-      <button class="pad l" id="padL" aria-label="Left answer"><span id="padLText">ODD</span><small><span class="touch-only">← swipe left</span><span class="kbd-only">← key</span></small></button>
-      <button class="pad r" id="padR" aria-label="Right answer"><span id="padRText">EVEN</span><small><span class="touch-only">swipe right →</span><span class="kbd-only">→ key</span></small></button>
+      <button class="pad l" id="padL" aria-label="ODD, left"><span id="padLText">ODD</span><small><span class="touch-only">← swipe left</span><span class="kbd-only">← key</span></small></button>
+      <button class="pad r" id="padR" aria-label="EVEN, right"><span id="padRText">EVEN</span><small><span class="touch-only">swipe right →</span><span class="kbd-only">→ key</span></small></button>
     </div>
   </section>
 
@@ -316,7 +327,7 @@
       <div class="panel" id="stSwitchPanel">
         <div class="panel-head"><h2>Switch cost</h2></div>
         <div id="stSwitch"></div>
-        <p class="explain">When the question changes from Odd/Even to Low/High (or back), your brain has to swap rules. Psychologists call the extra time this takes the switch cost. Practice shrinks it.</p>
+        <p class="explain">When the question changes from Odd/Even to Low/High (or back), you have to swap rules. Researchers who study task switching call the extra time this takes the switch cost. It’s a rough game measure, not a test of anything about you, and it moves around a lot from game to game.</p>
       </div>
       <div class="panel" id="stSplitPanel">
         <div class="panel-head"><h2>Accuracy by question</h2></div>
@@ -338,17 +349,23 @@
           <div class="label" id="rLabel">Score</div>
           <div class="big" id="rScore">0</div>
           <span class="badge" id="rBadge" hidden></span>
+          <div class="save-line" id="rSave" role="status" data-state="local"></div>
           <div class="xp-line" id="rXp" hidden></div>
         </div>
         <div class="r-stats">
           <div><b id="rCorrect">0/20</b><span>Correct</span></div>
-          <div><b id="rAvg">–</b><span>Avg time</span></div>
+          <div><b id="rAvg">–</b><span>Avg (correct)</span></div>
           <div><b id="rStreak">0</b><span>Best streak</span></div>
-          <div><b id="rRank">–</b><span>Rank</span></div>
+          <div><b id="rRank">–</b><span id="rRankK">This run</span></div>
         </div>
+        <p class="r-note" id="rBestRank" hidden></p>
         <div class="r-strip-wrap">
           <div class="r-strip-head"><span>Every answer</span><span class="r-legend"><i class="ok"></i>right <i class="no"></i>wrong · taller is faster</span></div>
           <div class="r-strip" id="rStrip" role="img" aria-label="Your answers"></div>
+          <details class="review" id="rReviewBox">
+            <summary>Review every answer</summary>
+            <ol class="review-list" id="rReview"></ol>
+          </details>
         </div>
         <div class="r-split" id="rSplitBars"></div>
         <p class="r-note" id="rSplit" hidden></p>
@@ -376,8 +393,8 @@
         </button>
       </div>
 
-      <div class="panel">
-        <div class="panel-head"><h2><span id="rBoardTitle">Leaderboard</span> <span class="sub" id="boardSub2">20 rounds</span></h2><span class="status" id="saveStatus"></span></div>
+      <div class="panel" id="rBoardPanel">
+        <div class="panel-head"><h2><span id="rBoardTitle">Leaderboard</span> <span class="sub" id="boardSub2">20 rounds</span></h2></div>
         <ol class="board" id="board2"></ol>
         <div class="empty" id="boardEmpty2" hidden></div>
       </div>
@@ -424,6 +441,28 @@
   </div>
 </div>
 <div class="toast" id="toast" role="status" hidden></div>
+<div class="sr-only" id="sr" aria-live="polite" aria-atomic="true"></div>
+
+<!-- REPORT -->
+<div class="scrim" id="reportScrim" hidden>
+  <form class="sheet nick-sheet" id="reportForm" role="dialog" aria-modal="true" aria-labelledby="reportTitle" novalidate>
+    <div class="sheet-head">
+      <h2 id="reportTitle">Report <span id="reportWho">player</span></h2>
+      <button type="button" class="icon-btn" id="reportClose" aria-label="Close"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
+    </div>
+    <fieldset class="report-reasons">
+      <legend class="field-label">What’s wrong?</legend>
+      <label><input type="radio" name="reason" value="name"> Offensive or impersonating nickname</label>
+      <label><input type="radio" name="reason" value="score"> Score looks cheated</label>
+      <label><input type="radio" name="reason" value="other"> Something else</label>
+    </fieldset>
+    <label class="field-label" for="reportNote">Anything to add? (optional)</label>
+    <input id="reportNote" class="field" maxlength="200" autocomplete="off">
+    <p class="field-error" id="reportError" hidden></p>
+    <button class="cta" id="reportSend" type="submit">Send report</button>
+    <p class="card-sub">Reports go to the game’s admin. The player isn’t told who reported them.</p>
+  </form>
+</div>
 
 
 <!-- NICKNAME -->

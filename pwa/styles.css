@@ -9,7 +9,7 @@
     --accent: #3346e0;
     --accent-ink: #ffffff;
     --left: #3346e0;
-    --right: #e0457b;
+    --right: #c42e65;
     --good: #16935a;
     --bad: #d33b30;
     --warn: #d98a1c;
@@ -195,7 +195,7 @@
     font-family: var(--display); font-weight: 800; font-size: min(36vw, 150px, 21vh); line-height: 1;
     font-variant-numeric: tabular-nums;
   }
-  .number.in { animation: pop .18s ease-out; }
+  /* the number appears instantly: no entrance animation while the clock runs */
   @keyframes pop { from { transform: scale(.82); opacity: .2; } to { transform: scale(1); opacity: 1; } }
   .verdict { height: 26px; font-weight: 600; font-variant-numeric: tabular-nums; display: flex; gap: 8px; align-items: center; }
   .verdict.good { color: var(--good); }
@@ -650,3 +650,114 @@ img { max-width: 100%; }
 .danger-zone .muted { font-size: 12px; color: var(--muted); }
 .ghost.danger { color: var(--bad); }
 .hint .link { font-size: inherit; }
+
+/* ===================== audit fixes ===================== */
+/* save status sits right under the score */
+.save-line { font-size: 13px; font-weight: 600; color: var(--muted); display: flex; align-items: center; justify-content: center; gap: 6px; min-height: 18px; }
+.save-line::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--muted); flex: none; }
+.save-line[data-state="posted"] { color: var(--good); }
+.save-line[data-state="posted"]::before { background: var(--good); }
+.save-line[data-state="sending"]::before, .save-line[data-state="waiting"]::before { background: var(--warn); }
+.save-line[data-state="sending"]::before { animation: blink 1s ease-in-out infinite; }
+.save-line[data-state="failed"] { color: var(--bad); }
+.save-line[data-state="failed"]::before { background: var(--bad); }
+.save-line:empty { display: none; }
+@keyframes blink { 50% { opacity: .3; } }
+
+.net-note.attn { border-color: color-mix(in srgb, var(--bad) 45%, var(--line)); }
+.rules-note { grid-column: 1 / -1; margin: 0; font-size: 12.5px; color: var(--muted); line-height: 1.45; }
+
+/* quick play first; game options tucked under it */
+.opts { border-radius: 14px; }
+.opts > summary { list-style: none; cursor: pointer; display: flex; align-items: center; gap: 8px; justify-content: center; font-size: 14px; color: var(--muted); padding: 4px 0; }
+.opts > summary::-webkit-details-marker { display: none; }
+.opts > summary #optsSummary { color: var(--ink); font-weight: 600; }
+.opts-change { color: var(--accent); font-weight: 600; text-decoration: underline; text-underline-offset: 3px; }
+.opts[open] .opts-change { display: none; }
+.opts[open] > summary { margin-bottom: 10px; }
+.opts .level-info { margin: 10px 0 0; }
+body.starting .cta[aria-busy="true"] { opacity: .65; cursor: progress; }
+
+.landing-card { border: 2px solid color-mix(in srgb, var(--accent) 45%, transparent); }
+.landing-card h2 { margin: 2px 0 6px; font-family: var(--display); font-size: 22px; line-height: 1.15; }
+.landing-card .panel-head { margin-bottom: 0; }
+.icon-btn.small { width: 32px; height: 32px; border-radius: 10px; }
+.daily-card.flash { animation: flash 1.6s var(--ease, ease) 1; }
+@keyframes flash { 30% { box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 55%, transparent); } }
+
+/* answer review */
+.review { margin-top: 10px; }
+.review > summary { cursor: pointer; font-size: 13px; font-weight: 600; color: var(--accent); }
+.review-list { list-style: none; margin: 10px 0 0; padding: 0; display: flex; flex-direction: column; gap: 4px; max-height: 320px; overflow-y: auto; }
+.review-list li { display: grid; grid-template-columns: 1fr auto auto; gap: 10px; align-items: center; font-size: 13px; padding: 6px 10px; border-radius: 10px; background: var(--surface-2); }
+.review-list .rv-a { color: var(--muted); font-variant-numeric: tabular-nums; }
+.review-list .rv-m { font-weight: 700; min-width: 3.5em; text-align: right; }
+.review-list li.ok .rv-m { color: var(--good); }
+.review-list li.no .rv-m { color: var(--bad); }
+.r-strip { cursor: pointer; }
+
+/* report button on leaderboard rows */
+.board li { position: relative; }
+.row-more { border: 0; background: transparent; width: 32px; height: 32px; margin-right: -6px; border-radius: 8px; display: grid; place-items: center; cursor: pointer; color: var(--muted); opacity: .55; }
+.row-more svg { width: 15px; height: 15px; stroke: currentColor; fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.row-more:hover, .row-more:focus-visible { opacity: 1; background: var(--surface-2); }
+.report-reasons { border: 0; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.report-reasons label { display: flex; gap: 10px; align-items: center; font-size: 15px; padding: 10px 12px; border-radius: 12px; background: var(--surface-2); cursor: pointer; }
+.report-reasons input { accent-color: var(--accent); width: 18px; height: 18px; }
+
+/* ---------- the game screen fits small phones, landscape and large text ---------- */
+/* the dial sizes itself from the space the stage actually has, so nothing gets pushed off-screen */
+.stage { container-type: size; }
+.dial { width: min(62cqw, 260px, 48cqh); container-type: inline-size; }
+.number { font-size: 58cqi; }
+.number.word { font-size: 25cqi; }
+/* practice has coach text: let the stage scroll instead of clipping it */
+.hud.tut ~ .stage { overflow-y: auto; justify-content: safe center; }
+
+@media (max-height: 620px) {
+  .app { padding-block: 8px 10px; }
+  #game.screen { gap: 10px; }
+  .hud > div { padding: 5px 8px; }
+  .hud .v { font-size: 17px; }
+  .hud .k { font-size: 10px; }
+  .pad { min-height: 64px; padding: 10px 8px; font-size: 19px; }
+  .stage { gap: 8px; }
+  .prompt { font-size: 19px; }
+  .coach { font-size: 13.5px; padding: 8px 12px; }
+  .swipe-hint { display: none; }
+  .count { font-size: 88px; }
+  .pause-card { gap: 10px; }
+}
+
+/* phones on their side: pads either side of the number */
+@media (orientation: landscape) and (max-height: 500px) {
+  #game.screen { display: grid; grid-template-columns: minmax(96px, 1fr) minmax(0, 2.2fr) minmax(96px, 1fr); grid-template-rows: auto minmax(0, 1fr); gap: 8px 12px; }
+  #game .hud { grid-column: 1 / -1; }
+  #game .pads { display: contents; }
+  #game .pad { min-height: 0; height: 100%; grid-row: 2; }
+  #game .pad.l { grid-column: 1; }
+  #game .pad.r { grid-column: 3; }
+  #game .stage { grid-column: 2; grid-row: 2; }
+  .dial { width: min(60cqw, 220px, 62cqh); }
+  .swipe-hint { display: none; }
+}
+
+/* ---------- light theme pink is darker for 4.5:1 text contrast (set in :root) ---------- */
+/* compact layouts once text zoom is taken into account (classes set by the app) */
+.bar > .brand { min-width: 0; }
+.bar-btns { flex: none; }
+.narrow .brand-name { display: none; }
+.narrow .bar-btns { gap: 6px; }
+.short .app.page .dock { position: static; background: none; padding-top: 8px; }
+.short .hero h1 { font-size: 30px; }
+.short #game .pad { min-height: 54px; padding: 8px; }
+.short #game.screen { gap: 8px; }
+.short .app { padding-block: 6px 8px; }
+.short .hud > div { padding: 4px 8px; }
+.short .hud .v { font-size: 16px; }
+.short .hud .k { font-size: 10px; }
+.short .swipe-hint { display: none; }
+.short .stage { gap: 6px; }
+.week { grid-template-columns: repeat(7, minmax(0, 1fr)); }
+.week i { max-width: 100%; height: auto !important; aspect-ratio: 1; }
+.narrow .week { gap: 3px; }

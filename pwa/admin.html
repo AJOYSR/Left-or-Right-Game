@@ -7,9 +7,9 @@
 <title>Admin · Left or Right</title>
 <link rel="icon" href="/icons/icon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="/fonts/fonts.css">
-<link rel="stylesheet" href="/styles.css">
-<link rel="stylesheet" href="/doc.css">
-<script type="module" src="/src/admin.js"></script>
+<link rel="stylesheet" href="/styles.css?v=11">
+<link rel="stylesheet" href="/doc.css?v=11">
+<script type="module" src="/src/admin.js?v=11"></script>
 </head>
 <body>
 <main class="doc">
@@ -39,6 +39,15 @@
       <thead><tr><th>Nickname</th><th>Games</th><th>Joined</th><th></th></tr></thead>
       <tbody id="players"></tbody>
     </table>
+
+    <h2>Reports <span class="muted" id="repCount"></span></h2>
+    <table class="adm-table">
+      <thead><tr><th>Player</th><th>Reason</th><th>When</th><th></th></tr></thead>
+      <tbody id="reports"></tbody>
+    </table>
+
+    <h2>Last 14 days <span class="muted">(event counts, no personal data)</span></h2>
+    <div class="adm-scroll"><table class="adm-table" id="funnel"></table></div>
 
     <h2>Recent errors <span class="muted" id="errCount"></span></h2>
     <table>
