@@ -255,10 +255,11 @@ let g = null;
 let roundTimer = 0, raf = 0, nextTimer = 0, countTimer = 0;
 
 // ---------- practice ----------
+// The whole game in two turns: the same number goes right under one rule and left under the other.
 const TUTORIAL = [
-  { type: 'parity', n: 6, coach: '<b>Odd or Even?</b> 6 is even, and even goes <b>right</b>. Swipe right, tap EVEN or press →.' },
-  { type: 'size', n: 3, coach: 'Now it’s <b>Low or High?</b> 3 is below 5, so it’s low. Low goes <b>left</b>.' },
-  { timed: true, coach: 'Now with the <b>3-second timer</b>. Read the question first: it can switch.' },
+  { type: 'parity', n: 2, coach: '<b>Odd or Even?</b> 2 is even, and even goes <b>right</b>. Tap EVEN, swipe right or press →.' },
+  { type: 'size', n: 2, coach: 'Same 2, <b>new rule</b>: Low or High? 2 is low, so this time it goes <b>left</b>. Always read the rule first.' },
+  { timed: true, coach: 'Now with the <b>3-second timer</b>. Rule first, then the number.' },
   { timed: true, coach: 'Odd and low go left. Even and high go right. Last one!' },
 ];
 const HARD_TUTORIAL = [
@@ -718,7 +719,8 @@ async function finish(ended) {
 
   if (run.mode === 'classic') {
     const prevBest = Math.max(localBest(run.rounds, run.hard), myBest(run.rounds, run.hard));
-    run.isBest = run.score > prevBest && run.score > 0; run.prevBest = prevBest;
+    // a first game has nothing to beat, so it isn't called a personal best
+    run.isBest = prevBest > 0 && run.score > prevBest; run.prevBest = prevBest; run.firstOfKind = prevBest === 0;
     if (run.score > localBest(run.rounds, run.hard)) store.set('best.' + modeKey(run.rounds, run.hard), run.score);
   }
   if (run.mode === 'daily') { const h = store.get('daily.history', {}); h[run.day] = run.score; store.set('daily.history', h); }
@@ -826,7 +828,7 @@ function celebrate(before) {
 function renderResults(run, { skipCount = false } = {}) {
   let badgeText = null, badgeGood = true;
   if (run.mode === 'classic') {
-    badgeText = run.isBest ? 'New personal best' : run.perfect ? 'Perfect round' : `Your best: ${run.prevBest.toLocaleString()}`;
+    badgeText = run.perfect ? 'Perfect round' : run.isBest ? `New best, up ${(run.score - run.prevBest).toLocaleString()}` : run.firstOfKind ? null : `Your best: ${run.prevBest.toLocaleString()}`;
     badgeGood = run.isBest || run.perfect;
   } else if (run.mode === 'daily') {
     const streak = dayStreak(dailyHistory());
@@ -847,7 +849,14 @@ function renderResults(run, { skipCount = false } = {}) {
   $('rStreak').textContent = run.bestStreak;
   // "This run" placing (out of everyone on that board), not the player's all-time best
   $('rRank').textContent = run.place ? `#${run.place}` : '–';
-  $('rRankK').textContent = run.place && run.of ? `This run, of ${run.of}` : 'This run';
+  $('rRankK').textContent = run.place && run.of ? `of ${run.of}` : 'Place';
+  $('rTitle').textContent = practice ? 'Practice' : run.mode === 'daily' ? `Daily #${dayNumber(run.day)}` : run.mode === 'challenge' ? 'Challenge' : 'Results';
+  const tk = takeaway(run);
+  $('rTakeawayK').textContent = tk.k; $('rTakeawayText').textContent = tk.t;
+  const misses = (run.log || []).filter(l => !l.ok).length;
+  $('reviewBtn').replaceChildren(misses ? 'Review mistakes' : 'Review answers');
+  if (misses) { const n = document.createElement('span'); n.className = 'count-pill'; n.textContent = misses; $('reviewBtn').append(' ', n); }
+  $('reviewBtn').setAttribute('aria-label', misses ? `Review ${misses} mistake${misses > 1 ? 's' : ''}` : 'Review every answer');
   $('rBestRank').hidden = !(run.mode === 'classic' && run.bestRank && run.bestRank !== run.place);
   $('rBestRank').textContent = `Your best run is #${run.bestRank} on this board`;
   if (!skipCount && run.saveState) setSave(run, run.saveState);
@@ -862,7 +871,7 @@ function renderResults(run, { skipCount = false } = {}) {
   for (const [k, v, alt] of [['Odd or Even', run.split.parity, false], ['Low or High', run.split.size, true]]) bars.append(meter(k, v[1] ? v[0] / v[1] : 0, `${v[0]}/${v[1]}`, alt));
   $('challengeBtn').hidden = run.mode !== 'classic' || !run.gameId || !run.posted;
   $('shareBtn').hidden = practice;
-  $('againBtn').textContent = practice ? 'Practise again' : run.mode === 'classic' ? 'Play again' : 'Play classic';
+  $('againBtn').textContent = practice ? 'Practise again' : run.mode === 'classic' ? 'Play again' : 'Quick play';
   renderResultsBoard();
 }
 
@@ -920,7 +929,41 @@ function renderReview(log) {
     return li;
   }));
 }
-$('rStrip').addEventListener('click', () => { const d = $('rReviewBox'); d.open = !d.open; if (d.open) { track('review_open'); d.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); } });
+const openReview = () => { const d = $('rReviewBox'); if (d.open) { d.open = false; return; } d.open = true; track('review_open'); d.scrollIntoView({ behavior: reduceMotion.matches ? 'auto' : 'smooth', block: 'start' }); };
+$('rStrip').addEventListener('click', openReview);
+$('reviewBtn').addEventListener('click', openReview);
+
+// One concrete thing to work on, from this run's answers.
+function takeaway(run) {
+  const L = run.log || [];
+  const miss = L.filter(l => !l.ok);
+  const rate = a => (a.length ? a.filter(l => l.ok).length / a.length : 1);
+  const swCost = run.swMs != null && run.repMs != null && (run.swN ?? 3) >= 3 ? run.swMs - run.repMs : null;
+  if (!L.length) return { k: 'Next time', t: 'Answer a few questions to get feedback here.' };
+  if (!miss.length) {
+    if (swCost != null && swCost >= 150) return { k: 'Clean run', t: `Every answer right. You were ${swCost} ms slower right after the rule changed: that gap is the thing to shrink next.` };
+    return { k: 'Clean run', t: run.hard ? 'Every answer right on Hard. That’s the top of the game.' : 'Every answer right. Try Hard next: the clock shrinks and the sides can swap.' };
+  }
+  const early = miss.filter(l => l.early).length;
+  const slow = miss.filter(l => l.d == null && !l.paused).length;
+  const flip = miss.filter(l => l.flip).length;
+  const sw = L.filter(l => l.sw === true), rp = L.filter(l => l.sw === false);
+  const par = L.filter(l => l.type === 'parity'), siz = L.filter(l => l.type === 'size');
+  const k = 'What to work on';
+  if (early >= 2) return { k, t: `${early} answers came in under 0.15 s and counted as guesses. Wait for the number, then move.` };
+  if (slow >= 3) return { k, t: `${slow} questions ran out of time. Read the rule first; once you know it, the number is quick.` };
+  if (flip >= 2) return { k, t: `${flip} misses were on swapped sides. When the sides swap, follow the words on the pads, not habit.` };
+  if (sw.length >= 3 && rp.length >= 3 && rate(rp) - rate(sw) >= 0.2) {
+    const m = sw.filter(l => !l.ok).length;
+    return { k, t: `Most misses came right after the rule changed (${m} of ${sw.length} switch questions). Check the rule before the number.` };
+  }
+  if (par.length && siz.length && Math.abs(rate(par) - rate(siz)) >= 0.15) {
+    const [weak, wl, strong, sl] = rate(par) < rate(siz) ? ['Odd/Even', par, 'Low/High', siz] : ['Low/High', siz, 'Odd/Even', par];
+    return { k, t: `You missed more ${weak} questions: ${wl.filter(l => l.ok).length}/${wl.length} right, against ${sl.filter(l => l.ok).length}/${sl.length} for ${strong}.` };
+  }
+  if (swCost != null && swCost >= 150) return { k, t: `You were ${swCost} ms slower right after the rule changed. That gap shrinks with practice.` };
+  return { k, t: `${miss.length} miss${miss.length > 1 ? 'es' : ''}, spread across question types. Review them to spot a pattern.` };
+}
 
 function countUp(el, to) {
   if (reduceMotion.matches || to <= 0) { el.textContent = to.toLocaleString(); return; }
@@ -959,7 +1002,6 @@ $('stPlay').addEventListener('click', () => play({ mode: 'classic' }));
 function renderSetup() {
   for (const b of $('roundsSeg').querySelectorAll('button')) b.setAttribute('aria-pressed', String(+b.dataset.r === rounds));
   for (const b of $('levelSeg').querySelectorAll('button')) b.setAttribute('aria-pressed', String(!!+b.dataset.h === hard));
-  $('playBtn').textContent = `Play ${rounds} rounds${hard ? ' · Hard' : ''}`;
   $('optsSummary').textContent = `${rounds} rounds · ${hard ? 'Hard' : 'Normal'}`;
   $('youBestK').textContent = `Best (${rounds}${hard ? ', Hard' : ''})`;
   $('levelInfo').hidden = !hard;
@@ -1162,7 +1204,7 @@ function renderYou() {
   // returning players get a short greeting instead of the full intro and rules
   const returning = statGames().length > 0;
   document.body.classList.toggle('returning', returning);
-  $('heroTitle').textContent = returning ? (me ? `Welcome back, ${me.nickname}.` : 'Welcome back.') : 'Odd or even. Low or high. Three seconds.';
+  $('heroTitle').textContent = returning ? (me && !me.guest ? `Welcome back, ${me.nickname}.` : 'Welcome back.') : 'Odd or even. Low or high. Three seconds.';
   $('youStatus').textContent = me ? me.nickname : '';
 }
 
@@ -1208,6 +1250,8 @@ function renderDaily() {
     return d;
   }));
   const mine = hist[todayKey];
+  // returning players who haven't played today: the Daily is the main thing on the page
+  document.body.classList.toggle('daily-open', mine == null && document.body.classList.contains('returning'));
   $('dailyPlay').hidden = mine != null;
   $('dailyDone').hidden = mine == null;
   const prog = dailyProgress();

@@ -26,5 +26,61 @@
    "styles.css": "styles.dd203d50a7.css",
    "doc.css": "doc.2be06cfe06.css"
   }
+ },
+ {
+  "release": "c9204ae5a7",
+  "at": "2026-11-26T13:50:13.213Z",
+  "files": {
+   "config.js": "config.6c2d557f76.js",
+   "core.js": "core.373fb97d34.js",
+   "queue.js": "queue.91786d6ba2.js",
+   "api.js": "api.85c113d010.js",
+   "main.js": "main.10e2f0ec14.js",
+   "admin.js": "admin.48843940de.js",
+   "styles.css": "styles.40c22c33c6.css",
+   "doc.css": "doc.2be06cfe06.css"
+  }
+ },
+ {
+  "release": "8cea289a22",
+  "at": "2026-11-26T13:51:21.650Z",
+  "files": {
+   "config.js": "config.6c2d557f76.js",
+   "core.js": "core.373fb97d34.js",
+   "queue.js": "queue.91786d6ba2.js",
+   "api.js": "api.85c113d010.js",
+   "main.js": "main.c84eaa5716.js",
+   "admin.js": "admin.48843940de.js",
+   "styles.css": "styles.8081602b66.css",
+   "doc.css": "doc.2be06cfe06.css"
+  }
+ },
+ {
+  "release": "5f7ac21916",
+  "at": "2026-11-26T13:51:36.721Z",
+  "files": {
+   "config.js": "config.6c2d557f76.js",
+   "core.js": "core.373fb97d34.js",
+   "queue.js": "queue.91786d6ba2.js",
+   "api.js": "api.85c113d010.js",
+   "main.js": "main.c84eaa5716.js",
+   "admin.js": "admin.48843940de.js",
+   "styles.css": "styles.861041ddd8.css",
+   "doc.css": "doc.2be06cfe06.css"
+  }
+ },
+ {
+  "release": "c19c3d29ac",
+  "at": "2026-11-26T13:52:39.522Z",
+  "files": {
+   "config.js": "config.6c2d557f76.js",
+   "core.js": "core.373fb97d34.js",
+   "queue.js": "queue.91786d6ba2.js",
+   "api.js": "api.85c113d010.js",
+   "main.js": "main.c84eaa5716.js",
+   "admin.js": "admin.48843940de.js",
+   "styles.css": "styles.418ba017f8.css",
+   "doc.css": "doc.2be06cfe06.css"
+  }
  }
 ]

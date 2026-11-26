@@ -30,8 +30,8 @@
 <link rel="preload" href="/fonts/inter-latin.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="/fonts/bricolage-grotesque-latin.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="/fonts/fonts.css">
-<link rel="stylesheet" href="/assets/styles.dd203d50a7.css">
-<script type="module" src="/assets/main.7becfceace.js"></script>
+<link rel="stylesheet" href="/assets/styles.418ba017f8.css">
+<script type="module" src="/assets/main.c84eaa5716.js"></script>
 </head>
 <body>
 <div class="app">
@@ -73,11 +73,6 @@
         <p class="card-sub" id="landingSub"></p>
         <button class="cta" id="landingPlay" type="button">Play</button>
       </div>
-      <div class="hero">
-        <h1 id="heroTitle">Odd or even. Low or high. Three seconds.</h1>
-        <p id="heroSub">A number from 1 to 9 appears, never 5. Answer the question before the ring runs out. Faster answers and longer streaks score more.</p>
-      </div>
-
       <div class="panel challenge-card" id="challengeCard" hidden>
         <div class="eyebrow">Challenge from a friend</div>
         <h2 id="cTitle">Same 20 questions. Beat their score.</h2>
@@ -87,6 +82,43 @@
           <button class="ghost" id="cDismiss">Not now</button>
           <button class="cta" id="cAccept">Accept challenge</button>
         </div>
+      </div>
+
+      <div class="hero">
+        <h1 id="heroTitle">Odd or even. Low or high. Three seconds.</h1>
+        <p id="heroSub">The rule can change every round. Read it, then pick a side before time runs out.</p>
+        <div class="hero-demo" aria-hidden="true">
+          <span class="demo-side l"><b>LOW</b><i>←</i></span>
+          <span class="demo-num">2</span>
+          <span class="demo-side r"><i>→</i><b>EVEN</b></span>
+        </div>
+        <p class="hero-demo-cap" id="heroDemoCap">Same number, different rule, different side.</p>
+      </div>
+
+      <div class="play-block" id="playBlock">
+        <button class="cta cta-play" id="playBtn" type="button"><span class="cta-main" id="playLabel">Quick play</span><span class="cta-sub" id="optsSummary">20 rounds · Normal</span></button>
+        <details class="opts" id="optsBox">
+          <summary>Change length or level</summary>
+          <div class="setups">
+            <div class="setup">
+              <span class="setup-label sr-only" id="roundsLabel">Rounds</span>
+              <div class="seg seg-lg" role="group" aria-labelledby="roundsLabel" id="roundsSeg">
+                <button data-r="15" aria-pressed="false">15</button>
+                <button data-r="20" aria-pressed="true">20</button>
+                <button data-r="30" aria-pressed="false">30</button>
+                <button data-r="50" aria-pressed="false">50</button>
+              </div>
+            </div>
+            <div class="setup">
+              <span class="setup-label sr-only" id="levelLabel">Level</span>
+              <div class="seg seg-lg" role="group" aria-labelledby="levelLabel" id="levelSeg">
+                <button data-h="0" aria-pressed="true">Normal</button>
+                <button data-h="1" aria-pressed="false">Hard</button>
+              </div>
+            </div>
+          </div>
+          <p class="level-info" id="levelInfo" hidden>Hard: the timer shrinks to 1.5 s; from a quarter of the way in, numbers can show as words or dots; from halfway, the sides sometimes swap.</p>
+        </details>
       </div>
 
       <div class="panel daily-card" id="dailyCard">
@@ -120,20 +152,6 @@
         </div>
       </div>
 
-      <div class="rules">
-        <div class="rule">
-          <h3>Odd or Even?</h3>
-          <div class="row"><span class="chip l">← ODD</span><span class="nums">1 3 7 9</span></div>
-          <div class="row"><span class="chip r">EVEN →</span><span class="nums">2 4 6 8</span></div>
-        </div>
-        <div class="rule">
-          <h3>Low or High?</h3>
-          <div class="row"><span class="chip l">← LOW</span><span class="nums">1 2 3 4</span></div>
-          <div class="row"><span class="chip r">HIGH →</span><span class="nums">6 7 8 9</span></div>
-        </div>
-        <p class="rules-note">Answers in the first 0.15 s count as guesses (wrong). Pausing between questions is free; pausing while a number is showing counts that one as missed.</p>
-      </div>
-
       <div class="panel" id="youPanel">
         <div class="panel-head"><h2>You</h2><span class="status" id="youStatus"></span><button class="link" id="youNameBtn" hidden>Pick a name</button></div>
         <div class="level-row" id="levelRow">
@@ -162,33 +180,35 @@
         <ol class="board" id="board"></ol>
         <div class="empty" id="boardEmpty">Loading scores…</div>
       </div>
-    </div>
 
-    <div class="dock">
-    <button class="cta" id="playBtn">Play 20 rounds</button>
-    <details class="opts" id="optsBox">
-      <summary><span class="opts-k">Game</span> <span id="optsSummary">20 rounds · Normal</span> <span class="opts-change">Change</span></summary>
-      <div class="setups">
-      <div class="setup">
-        <span class="setup-label sr-only" id="roundsLabel">Rounds</span>
-        <div class="seg seg-lg" role="group" aria-labelledby="roundsLabel" id="roundsSeg">
-          <button data-r="15" aria-pressed="false">15</button>
-          <button data-r="20" aria-pressed="true">20</button>
-          <button data-r="30" aria-pressed="false">30</button>
-          <button data-r="50" aria-pressed="false">50</button>
+      <details class="panel how-panel" id="howPanel">
+        <summary><h2>How it works</h2></summary>
+        <div class="rules">
+          <div class="rule">
+            <h3>Odd or Even?</h3>
+            <div class="row"><span class="chip l">← ODD</span><span class="nums">1 3 7 9</span></div>
+            <div class="row"><span class="chip r">EVEN →</span><span class="nums">2 4 6 8</span></div>
+          </div>
+          <div class="rule">
+            <h3>Low or High?</h3>
+            <div class="row"><span class="chip l">← LOW</span><span class="nums">1 2 3 4</span></div>
+            <div class="row"><span class="chip r">HIGH →</span><span class="nums">6 7 8 9</span></div>
+          </div>
         </div>
-      </div>
-      <div class="setup">
-        <span class="setup-label sr-only" id="levelLabel">Level</span>
-        <div class="seg seg-lg" role="group" aria-labelledby="levelLabel" id="levelSeg">
-          <button data-h="0" aria-pressed="true">Normal</button>
-          <button data-h="1" aria-pressed="false">Hard</button>
-        </div>
-      </div>
-      </div>
-      <p class="level-info" id="levelInfo" hidden>Hard: the timer shrinks to 1.5 s; from a quarter of the way in, numbers can show as words or dots; from halfway, the sides sometimes swap.</p>
-    </details>
-    <div class="hint"><button class="link" id="howBtn">How to play</button> · <button class="link" id="untimedBtn">Untimed practice</button> · <a class="link" href="/privacy">Privacy</a><span class="kbd-only"> · <kbd>←</kbd> <kbd>→</kbd></span></div>
+        <ul class="fine">
+          <li>Numbers run from 1 to 9 and never include 5.</li>
+          <li>Faster answers and longer streaks score more.</li>
+          <li>Answers in the first 0.15 s count as guesses.</li>
+          <li>Pausing between questions is free. Pausing while a number is showing counts that one as missed.</li>
+        </ul>
+        <button class="ghost small" id="howBtn" type="button">Replay the practice</button>
+      </details>
+
+      <footer class="home-foot">
+        <button class="link" id="untimedBtn" type="button">Untimed practice</button>
+        <a class="link" href="/privacy">Privacy</a>
+        <span class="kbd-only">Keys: <kbd>←</kbd> <kbd>→</kbd> · <kbd>P</kbd> pause</span>
+      </footer>
     </div>
   </section>
 
@@ -283,6 +303,34 @@
       <span class="bar-spacer"></span>
     </header>
     <div class="scroll">
+      <div class="panel empty-panel" id="stEmpty" hidden>
+        <h2>No games yet</h2>
+        <p class="card-sub">Play a game and your score trend, accuracy and switch cost show up here.</p>
+        <button class="cta" id="stPlay">Play a game</button>
+      </div>
+      <div class="panel" id="stLevelPanel">
+        <div class="panel-head"><h2>Level <span class="sub" id="stLevelSub"></span></h2></div>
+        <div class="level-bar big"><i id="stLevelFill"></i></div>
+        <p class="card-sub level-next" id="stLevelNext"></p>
+      </div>
+      <div class="st-tiles" id="stTiles"></div>
+      <div class="panel" id="stTrendPanel">
+        <div class="panel-head"><h2>Score trend <span class="sub">points per round, last 30 games</span></h2></div>
+        <div class="chart" id="stTrend"></div>
+      </div>
+      <div class="panel" id="stSwitchPanel">
+        <div class="panel-head"><h2>Switch cost</h2></div>
+        <div id="stSwitch"></div>
+        <p class="explain">When the question changes from Odd/Even to Low/High (or back), you have to swap rules. Researchers who study task switching call the extra time this takes the switch cost. It’s a rough game measure, not a test of anything about you, and it moves around a lot from game to game.</p>
+      </div>
+      <div class="panel" id="stSplitPanel">
+        <div class="panel-head"><h2>Accuracy by question</h2></div>
+        <div id="stSplit"></div>
+      </div>
+      <div class="panel" id="stBadgesPanel">
+        <div class="panel-head"><h2>Badges <span class="sub" id="stBadgeCount"></span></h2></div>
+        <div class="badges" id="stBadges"></div>
+      </div>
       <div class="panel player-panel" id="playerPanel">
         <div class="panel-head"><h2>Player</h2><span class="status" id="playerStatus"></span></div>
         <div class="player-row">
@@ -305,44 +353,26 @@
             </div>
           </div>
         </details>
+      </div>
+      <div class="panel danger-panel" id="dangerPanel">
+        <div class="panel-head"><h2>Your data</h2></div>
         <div class="danger-zone">
           <button class="ghost small danger" id="deleteMeBtn" type="button">Delete my player</button>
           <span class="muted" id="deleteMeNote">Removes your nickname, games and reminders for good.</span>
         </div>
-      </div>
-      <div class="panel" id="stLevelPanel">
-        <div class="panel-head"><h2>Level <span class="sub" id="stLevelSub"></span></h2></div>
-        <div class="level-bar big"><i id="stLevelFill"></i></div>
-        <p class="card-sub level-next" id="stLevelNext"></p>
-      </div>
-      <div class="panel" id="stBadgesPanel">
-        <div class="panel-head"><h2>Badges <span class="sub" id="stBadgeCount"></span></h2></div>
-        <div class="badges" id="stBadges"></div>
-      </div>
-      <div class="st-tiles" id="stTiles"></div>
-      <div class="panel" id="stTrendPanel">
-        <div class="panel-head"><h2>Score trend <span class="sub">points per round, last 30 games</span></h2></div>
-        <div class="chart" id="stTrend"></div>
-      </div>
-      <div class="panel" id="stSwitchPanel">
-        <div class="panel-head"><h2>Switch cost</h2></div>
-        <div id="stSwitch"></div>
-        <p class="explain">When the question changes from Odd/Even to Low/High (or back), you have to swap rules. Researchers who study task switching call the extra time this takes the switch cost. It’s a rough game measure, not a test of anything about you, and it moves around a lot from game to game.</p>
-      </div>
-      <div class="panel" id="stSplitPanel">
-        <div class="panel-head"><h2>Accuracy by question</h2></div>
-        <div id="stSplit"></div>
-      </div>
-      <div class="panel empty-panel" id="stEmpty" hidden>
-        <h2>No games yet</h2>
-        <p class="card-sub">Play a game and your score trend, accuracy and switch cost show up here.</p>
-        <button class="cta" id="stPlay">Play a game</button>
       </div>
     </div>
   </section>
 
   <!-- RESULTS -->
   <section class="screen" id="results" hidden>
+    <header class="bar">
+      <button class="icon-btn" id="homeBtn" aria-label="Back to home" title="Home">
+        <svg viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"/></svg>
+      </button>
+      <div class="brand" id="rTitle">Results</div>
+      <span class="bar-spacer"></span>
+    </header>
     <div class="scroll">
       <div class="result-card">
         <div class="result-top">
@@ -359,6 +389,14 @@
           <div><b id="rRank">–</b><span id="rRankK">This run</span></div>
         </div>
         <p class="r-note" id="rBestRank" hidden></p>
+        <div class="takeaway" id="rTakeaway">
+          <span class="tk-k" id="rTakeawayK">What to work on</span>
+          <p id="rTakeawayText"></p>
+        </div>
+        <div class="r-next">
+          <button class="cta" id="againBtn" type="button">Play again</button>
+          <button class="ghost" id="reviewBtn" type="button">Review mistakes</button>
+        </div>
         <div class="r-strip-wrap">
           <div class="r-strip-head"><span>Every answer</span><span class="r-legend"><i class="ok"></i>right <i class="no"></i>wrong · taller is faster</span></div>
           <div class="r-strip" id="rStrip" role="img" aria-label="Your answers"></div>
@@ -371,17 +409,6 @@
         <p class="r-note" id="rSplit" hidden></p>
       </div>
 
-      <form class="panel save-name" id="saveName" novalidate hidden>
-        <div class="eyebrow">Save your score</div>
-        <h2>Put your name on the leaderboard</h2>
-        <p class="card-sub">You’re playing as <b id="guestName">Guest</b>. Pick a name so friends can find you.</p>
-        <div class="code-row">
-          <input id="saveNameInput" class="field" maxlength="20" autocomplete="nickname" spellcheck="false" placeholder="Your nickname" aria-label="Nickname">
-          <button class="cta small-cta" id="saveNameBtn" type="submit">Save</button>
-        </div>
-        <p class="field-error" id="saveNameError" hidden></p>
-      </form>
-
       <div class="r-actions">
         <button class="action" id="shareBtn">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12"/><path d="m7 8 5-5 5 5"/><path d="M5 13v6a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-6"/></svg>
@@ -393,15 +420,21 @@
         </button>
       </div>
 
+      <form class="panel save-name" id="saveName" novalidate hidden>
+        <h2>Add a nickname</h2>
+        <p class="card-sub">You’re on the board as <b id="guestName">Guest</b>. A name helps friends find you.</p>
+        <div class="code-row">
+          <input id="saveNameInput" class="field" maxlength="20" autocomplete="nickname" spellcheck="false" placeholder="Your nickname" aria-label="Nickname">
+          <button class="ghost small" id="saveNameBtn" type="submit">Save</button>
+        </div>
+        <p class="field-error" id="saveNameError" hidden></p>
+      </form>
+
       <div class="panel" id="rBoardPanel">
         <div class="panel-head"><h2><span id="rBoardTitle">Leaderboard</span> <span class="sub" id="boardSub2">20 rounds</span></h2></div>
         <ol class="board" id="board2"></ol>
         <div class="empty" id="boardEmpty2" hidden></div>
       </div>
-    </div>
-    <div class="row-btns dock">
-      <button class="ghost" id="homeBtn">Home</button>
-      <button class="cta" id="againBtn">Play again</button>
     </div>
   </section>
 </div>

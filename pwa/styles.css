@@ -761,3 +761,128 @@ body.starting .cta[aria-busy="true"] { opacity: .65; cursor: progress; }
 .week { grid-template-columns: repeat(7, minmax(0, 1fr)); }
 .week i { max-width: 100%; height: auto !important; aspect-ratio: 1; }
 .narrow .week { gap: 3px; }
+
+/* =====================================================================
+   Design pass 2: one obvious first move, the rule as the hero of play,
+   results that say what to do next, flatter surfaces with the blue/pink
+   split as the identity.
+   ===================================================================== */
+:root { --shadow: 0 1px 2px rgb(18 20 28 / .05); --lift: 0 6px 18px rgb(18 20 28 / .07); }
+:root[data-theme="dark"] { --shadow: 0 1px 2px rgb(0 0 0 / .35); --lift: 0 6px 18px rgb(0 0 0 / .35); }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --shadow: 0 1px 2px rgb(0 0 0 / .35); --lift: 0 6px 18px rgb(0 0 0 / .35); } }
+
+/* flatter cards: a hairline instead of a floating shadow */
+.panel, .rule, .result-card, .action, .st-tiles > div, .coach, .pause-stats > div, .daily-result > div {
+  box-shadow: none; border: 1px solid var(--line);
+}
+.daily-card { border-color: color-mix(in srgb, var(--accent) 22%, var(--line)); }
+.challenge-card { border-width: 2px; }
+.cta { box-shadow: 0 4px 14px color-mix(in srgb, var(--accent) 28%, transparent); }
+@media (hover: hover) and (pointer: fine) { .cta:hover { box-shadow: 0 8px 22px color-mix(in srgb, var(--accent) 34%, transparent); } }
+.install-btn { color: var(--ink); border-color: var(--line); }
+.install-btn svg { stroke: var(--ink); }
+.meter .fill.alt { background: color-mix(in srgb, var(--accent) 55%, var(--surface-2)); }
+
+/* ---------- home ---------- */
+#home .scroll { padding-bottom: 8px; }
+#home .scroll > .net-note, #home .scroll > .landing-card, #home .scroll > .challenge-card { order: -10; }
+#home .scroll > .hero { order: -6; }
+#home .scroll > .play-block { order: -4; }
+.daily-open #home .scroll > #dailyCard { order: -5; }
+
+.hero { display: flex; flex-direction: column; gap: 10px; padding-top: 4px; }
+.hero h1 { margin: 0; }
+.hero > p#heroSub { font-size: 17px; color: var(--ink); opacity: .78; max-width: 34ch; }
+.hero-demo { display: flex; align-items: center; justify-content: center; gap: 14px; margin-top: 8px; }
+.demo-num { font-family: var(--display); font-weight: 800; font-size: 72px; line-height: 1; font-variant-numeric: tabular-nums; width: 1.1ch; text-align: center; }
+.demo-side { display: inline-flex; align-items: center; gap: 6px; padding: 8px 14px; border-radius: 99px; color: var(--accent-ink);
+  font-family: var(--display); font-weight: 700; font-size: 17px; letter-spacing: .02em; }
+.demo-side.l { background: var(--left); }
+.demo-side.r { background: var(--right); }
+.demo-side i { font-style: normal; opacity: .85; }
+.hero-demo-cap { margin: 0; text-align: center; font-size: 13px; color: var(--muted); }
+@media (prefers-reduced-motion: no-preference) {
+  .demo-side.l { animation: demoL 3.2s ease-in-out infinite; }
+  .demo-side.r { animation: demoR 3.2s ease-in-out infinite; }
+  @keyframes demoL { 0%, 45% { opacity: 1; transform: none; } 50%, 95% { opacity: .28; transform: scale(.94); } 100% { opacity: 1; } }
+  @keyframes demoR { 0%, 45% { opacity: .28; transform: scale(.94); } 50%, 95% { opacity: 1; transform: none; } 100% { opacity: .28; } }
+}
+.returning .hero > p#heroSub, .returning .hero-demo, .returning .hero-demo-cap { display: none; }
+
+.play-block { display: flex; flex-direction: column; gap: 8px; }
+.cta-play { display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 15px 18px; }
+.cta-main { font-size: 20px; }
+.cta-sub { font-family: var(--body); font-weight: 500; font-size: 13px; opacity: .85; }
+.daily-open .cta-play { background: var(--surface); color: var(--ink); border: 1px solid var(--line); box-shadow: none; }
+.opts > summary { font-size: 13.5px; color: var(--muted); text-decoration: underline; text-underline-offset: 3px; padding: 2px 0; }
+.opts[open] > summary { margin-bottom: 12px; text-decoration: none; }
+.opts .setups { justify-content: center; }
+
+/* the Daily's button is a strong second choice for newcomers, the main one for returning players */
+body:not(.daily-open) #dailyBtn { background: var(--surface); color: var(--accent); box-shadow: none; border: 1.5px solid color-mix(in srgb, var(--accent) 45%, var(--line)); }
+
+.how-panel { padding: 0; }
+.how-panel > summary { list-style: none; cursor: pointer; display: flex; align-items: center; justify-content: space-between; padding: 16px 20px; }
+.how-panel > summary::-webkit-details-marker { display: none; }
+.how-panel > summary h2 { margin: 0; font-family: var(--display); font-size: 18px; }
+.how-panel > summary::after { content: ""; width: 9px; height: 9px; border-right: 2px solid var(--muted); border-bottom: 2px solid var(--muted); transform: rotate(45deg); margin: -4px 4px 0 0; transition: transform .2s var(--ease); }
+.how-panel[open] > summary::after { transform: rotate(225deg); margin-top: 4px; }
+.how-panel > :not(summary) { margin: 0 20px; }
+.how-panel > :last-child { margin-bottom: 18px; }
+.how-panel .rule { border: 0; background: var(--surface-2); }
+.fine { margin: 14px 20px 14px; padding-left: 18px; color: var(--muted); font-size: 13.5px; line-height: 1.55; }
+.home-foot { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px 18px; font-size: 13px; color: var(--muted); padding: 6px 0 14px; }
+.home-foot .link { font-weight: 500; color: var(--muted); }
+.home-foot kbd { font-family: var(--body); font-size: 11px; border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 5px; padding: 0 5px; background: var(--surface); }
+
+/* ---------- game: one quiet HUD, and the rule is the second thing you see ---------- */
+.hud { display: flex; align-items: stretch; gap: 0; background: var(--surface); border: 1px solid var(--line); border-radius: 16px; padding: 4px; }
+.hud > div { background: none; box-shadow: none; border-radius: 0; padding: 6px 12px; flex: 1; min-width: 0; }
+.hud > div + div { border-left: 1px solid var(--line); }
+.hud .k { font-size: 10.5px; }
+.hud .v { font-size: 19px; }
+.hud-pause, .skip { box-shadow: none; background: var(--surface-2); border-radius: 12px; flex: none; }
+.hud-pause { width: 48px; }
+.hud.tut > .hud-round { flex: 1; }
+.prompt { font-size: 24px; gap: 12px; }
+.prompt .chip { font-size: 19px; padding: 7px 16px; letter-spacing: .03em; font-family: var(--display); font-weight: 700; }
+.dial { width: min(70cqw, 300px, 50cqh); }
+.verdict { font-size: 16px; }
+.swipe-hint { opacity: .8; }
+.short .prompt .chip { font-size: 15px; padding: 5px 12px; }
+.short .prompt { font-size: 19px; }
+/* desktop and tablets: keep the playfield together instead of stretched over a tall window */
+@media (min-width: 600px) and (min-height: 760px) {
+  #game.screen { flex: 0 1 700px; margin-block: auto; }
+  #game .stage { gap: 18px; }
+}
+
+/* ---------- results: how did I do, what to work on, what next ---------- */
+#results .bar .brand { font-size: 17px; }
+.result-card { gap: 18px; padding: 24px 18px 18px; }
+.result-top .big { font-size: clamp(60px, 19vw, 84px); }
+.takeaway { display: flex; flex-direction: column; gap: 4px; padding: 12px 14px; border-radius: 14px;
+  background: color-mix(in srgb, var(--accent) 8%, var(--surface)); border: 1px solid color-mix(in srgb, var(--accent) 18%, transparent); }
+.tk-k { font-size: 11px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; color: var(--accent); }
+.takeaway p { margin: 0; font-size: 15px; line-height: 1.45; }
+.r-next { display: grid; grid-template-columns: 1.3fr 1fr; gap: 10px; }
+.r-next .cta { padding: 15px; font-size: 17px; }
+.r-next .ghost { padding: 15px 10px; font-size: 14.5px; }
+.r-stats span { white-space: nowrap; }
+.save-name { border: 1px solid var(--line); gap: 8px; }
+.save-name h2 { font-size: 17px; }
+.save-name .ghost.small { padding: 10px 16px; }
+.danger-panel .danger-zone { margin-top: 0; padding-top: 0; border-top: 0; }
+.practice-result .takeaway { background: var(--surface-2); border-color: var(--line); }
+@media (max-width: 360px) { .r-next { grid-template-columns: 1fr; } }
+.review > summary { display: none; }   /* opened by the Review button or by tapping the answer strip */
+.review[open] { margin-top: 4px; }
+.count-pill { display: inline-grid; place-items: center; min-width: 22px; height: 22px; padding: 0 6px; border-radius: 99px; font-size: 12px; font-weight: 700;
+  background: color-mix(in srgb, var(--bad) 14%, transparent); color: var(--bad); vertical-align: 1px; }
+.r-next .ghost { white-space: nowrap; }
+.hero > .hero-demo-cap { max-width: none; align-self: stretch; }
+.narrow .hero-demo { gap: 8px; }
+.narrow .demo-num { font-size: 52px; }
+.narrow .demo-side { font-size: 13px; padding: 6px 10px; gap: 4px; }
+.board li:has(.row-more) { grid-template-columns: 28px 28px minmax(0, 1fr) auto 28px; }
+.row-more { width: 28px; margin-right: -4px; }
