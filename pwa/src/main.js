@@ -99,6 +99,7 @@ let rounds = ROUND_OPTIONS.includes(store.get('rounds', 20)) ? store.get('rounds
 let hard = !!store.get('hard', false);
 let boardR = rounds, boardH = hard;   // which classic board the home leaderboard shows (follows Quick play)
 let badgesExpanded = false;
+let updateWaiting = false;   // a new version took over and should load at the next safe moment
 const modeKey = (r, h) => (h ? 'h' : 'n') + r;
 const localBest = (r = rounds, h = hard) => store.get('best.' + modeKey(r, h), 0);
 let localPlays = store.get('plays', 0);
@@ -1050,7 +1051,11 @@ function countUp(el, to) {
   el.textContent = '0'; requestAnimationFrame(step);
 }
 
-function goHome() { show('home'); renderAll(); refreshRemote(); }
+function goHome() {
+  // a new version arrived while they were playing: load it now, between games
+  if (updateWaiting) { location.reload(); return; }
+  show('home'); renderAll(); refreshRemote();
+}
 
 // ================= home controls =================
 $('playBtn').addEventListener('click', () => play({ mode: 'classic' }));
@@ -1840,7 +1845,21 @@ $('installBtn').addEventListener('click', async () => {
 $('iosClose').addEventListener('click', () => closeDialog($('iosScrim')));
 
 if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) {
-  navigator.serviceWorker?.register('/sw.js').catch(() => {});
+  // Updates: look for a new version whenever the app comes back to the front (and every 30 minutes).
+  // When one takes over, reload straight away if nothing is in progress; mid-game, wait until they
+  // go back home. Without this an open tab or installed app keeps showing the old version.
+  const hadController = !!navigator.serviceWorker.controller;
+  navigator.serviceWorker.register('/sw.js').then(reg => {
+    const check = () => reg.update().catch(() => {});
+    addEventListener('visibilitychange', () => { if (!document.hidden) check(); });
+    setInterval(check, 30 * 60 * 1000);
+  }).catch(() => {});
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (!hadController || updateWaiting) return;   // first install: nothing old on screen
+    const busy = !$('game').hidden || !$('shareScrim').hidden || !$('nickScrim').hidden || !$('reportScrim').hidden;
+    if (busy) { updateWaiting = true; return; }
+    updateWaiting = true; location.reload();
+  });
 }
 
 // ================= connectivity & boot =================
