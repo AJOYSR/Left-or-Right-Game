@@ -634,6 +634,7 @@ function pauseGame(reason) {
   $('pScore').textContent = (g.tutorial ? 0 : g.run.score).toLocaleString();
   $('pLeftK').textContent = v1Limits() ? 'Pauses left' : 'Pauses used';
   $('pLeft').textContent = g.tutorial ? '–' : v1Limits() ? Math.max(0, MAX_PAUSES - g.pauses) : g.pauses;
+  $('pLeft').parentElement.hidden = !!(g.tutorial || g.untimed);   // pausing practice is free, so there's nothing to count
   $('pauseMain').hidden = false; $('pauseConfirm').hidden = true;
   document.querySelector('.app').classList.add('is-paused');
   renderPauseBtn();
@@ -662,7 +663,7 @@ $('resumeBtn').addEventListener('click', resumeGame);
 $('restartBtn').addEventListener('click', () => askConfirm('Restart from round 1? This score won’t be saved.', 'Restart',
   () => (g && g.untimed ? startPractice() : startGame({ mode: 'classic' }))));
 $('quitBtn').addEventListener('click', () => {
-  if (g && !g.tutorial && (g.mode === 'daily' || g.mode === 'challenge')) askConfirm('End your one try now? Your score so far will count.', 'End it', () => { clearAll(); finish(true); });
+  if (g && !g.tutorial && (g.mode === 'daily' || g.mode === 'challenge')) askConfirm(g.mode === 'daily' ? 'End your one try now? Your score so far is submitted as today’s result.' : 'End your one try now? Your score so far is submitted.', 'End and submit', () => { clearAll(); finish(true); });
   else askConfirm('Quit this game? This score won’t be saved.', 'Quit', () => { clearAll(); g = null; goHome(); });
 });
 $('confirmNo').addEventListener('click', () => { $('pauseConfirm').hidden = true; $('pauseMain').hidden = false; focusKbd($('resumeBtn')); });
@@ -750,6 +751,7 @@ async function finish(ended) {
   const run = {
     mode: g.mode, gameId: g.gameId, rounds: g.rounds, hard: g.hard, seed: g.seed, code: g.code, day: g.day, version: g.version,
     ...s, pauses: g.pauses, log: g.run.log, date: new Date(), place: null, of: null, bestRank: null, posted: false,
+    ended: !!ended, played: (g.run.log || []).length,
   };
   lastRun = run;
   const events = g.run.events;
@@ -888,6 +890,12 @@ function renderResults(run, { skipCount = false } = {}) {
     run.dayStreak = streak;
     badgeText = streak > 1 ? `${streak}-day streak` : 'Streak started. Come back tomorrow';
   }
+  const early = run.ended && run.played < run.rounds;
+  if (early) {
+    // an attempt ended on purpose is still the day's result (it was submitted), but it shouldn't read like a full run
+    badgeText = `Ended early: ${run.played} of ${run.rounds} rounds played` + (run.mode === 'daily' ? (run.dayStreak > 1 ? ` · ${run.dayStreak}-day streak kept` : ' · counts for your streak') : '');
+    badgeGood = false;
+  }
   const practice = run.mode === 'practice';
   document.body.classList.toggle('practice-result', practice);
   $('rXp').hidden = !run.score || practice;
@@ -898,7 +906,8 @@ function renderResults(run, { skipCount = false } = {}) {
   if (me && me.guest) $('guestName').textContent = me.nickname;
   $('rLabel').textContent = practice ? 'Untimed practice' : run.mode === 'daily' ? `Daily #${dayNumber(run.day)}` : run.mode === 'challenge' ? 'Challenge score' : `Score · ${run.rounds} rounds${run.hard ? ' · Hard' : ''}`;
   if (!skipCount) countUp($('rScore'), practice ? run.correct : run.score);
-  $('rCorrect').textContent = `${run.correct}/${run.rounds}`;
+  $('rCorrect').textContent = `${run.correct}/${early ? run.played : run.rounds}`;
+  $('rCorrect').nextElementSibling.textContent = early ? 'Correct (played)' : 'Correct';
   $('rAvg').textContent = run.avgMs ? (run.avgMs / 1000).toFixed(2) + 's' : '–';
   $('rStreak').textContent = run.bestStreak;
   // "This run" placing (out of everyone on that board), not the player's all-time best
@@ -923,7 +932,8 @@ function renderResults(run, { skipCount = false } = {}) {
   $('rSplit').hidden = !run.pauses;
   if (!skipCount) renderStrip(run.log);
   const bars = $('rSplitBars'); bars.replaceChildren();
-  for (const [k, v, alt] of [['Odd or Even', run.split.parity, false], ['Low or High', run.split.size, true]]) bars.append(meter(k, v[1] ? v[0] / v[1] : 0, `${v[0]}/${v[1]}`, alt));
+  // a rule that never came up (a run ended early) has nothing to show
+  for (const [k, v, alt] of [['Odd or Even', run.split.parity, false], ['Low or High', run.split.size, true]]) if (v[1]) bars.append(meter(k, v[0] / v[1], `${v[0]}/${v[1]}`, alt));
   $('challengeBtn').hidden = run.mode !== 'classic' || !run.gameId || !run.posted;
   $('shareBtn').hidden = practice;
   $('againBtn').textContent = practice ? 'Practise again' : run.mode === 'classic' ? 'Play again' : 'Quick play';
@@ -1037,6 +1047,9 @@ function takeaway(run) {
   const rate = a => (a.length ? a.filter(l => l.ok).length / a.length : 1);
   const swCost = run.swMs != null && run.repMs != null && (run.swN ?? 3) >= 3 ? run.swMs - run.repMs : null;
   if (!L.length) return { k: 'Next time', t: 'Answer a few questions to get feedback here.' };
+  if (L.length < 6) return { k: 'Next time', t: run.ended
+    ? `You ended after ${L.length} round${L.length > 1 ? 's' : ''}: too few answers to spot a pattern. A full game gets you feedback here.`
+    : 'Too few answers to spot a pattern yet.' };
   if (!miss.length) {
     if (swCost != null && swCost >= 150) return { k: 'Clean run', t: `Every answer right. You were ${swCost} ms slower right after the rule changed: that gap is the thing to shrink next.` };
     return { k: 'Clean run', t: run.hard ? 'Every answer right on Hard. That’s the top of the game.' : 'Every answer right. Try Hard next: the clock shrinks and the sides can swap.' };
@@ -1063,7 +1076,7 @@ function takeaway(run) {
     const [weak, wl, strong, sl] = rate(par) < rate(siz) ? ['Odd/Even', par, 'Low/High', siz] : ['Low/High', siz, 'Odd/Even', par];
     const right = wl.filter(l => l.ok).length;
     const tip = right === 0 ? ` Check the rule above the number: ${weak === 'Low/High' ? '1–4 is low, 6–9 is high' : '1, 3, 7, 9 are odd'}.` : '';
-    cands.push({ n: wl.length - right, t: `You missed more ${weak} questions: ${right}/${wl.length} right, against ${sl.filter(l => l.ok).length}/${sl.length} for ${strong}.${tip}` });
+    cands.push({ n: wl.length - right, t: `${weak} was your weaker rule: ${right} of ${wl.length} right, against ${sl.filter(l => l.ok).length} of ${sl.length} for ${strong}.${tip}` });
   }
   if (cands.length) return { k, t: cands.reduce((best, c) => (c.n > best.n ? c : best)).t };
   if (swCost != null && swCost >= 150) return { k, t: `You were ${swCost} ms slower right after the rule changed. That gap shrinks with practice.` };
@@ -1417,6 +1430,7 @@ function renderDaily() {
     $('dailyNextK').textContent = `New one at ${nextDailyLocalTime()}`;
   }
   $('dailyResets').textContent = `A new Daily opens every day at ${nextDailyLocalTime()} your time.`;
+  $('dailyResets').hidden = mine != null;   // the done state already shows when the next one opens
   $('dailyRemindBtn').hidden = mine == null || !remindersPossible() || store.get('reminders', false);
 }
 const Replay = prog => (prog.events || []).filter(e => e.o === 'a').length;
@@ -1533,23 +1547,25 @@ function renderStats() {
   $('stTiles').replaceChildren(...tiles.map(([v, k]) => { const d = document.createElement('div'); const b = document.createElement('b'); b.textContent = v; const s = document.createElement('span'); s.textContent = k; d.append(b, s); return d; }));
 
   // With only a game or two, a trend chart is a dot. Show the starting point instead.
-  const fewGames = games.length < 3;
+  // Normal and Hard don't belong on one line: Hard has a shorter clock and words/dots. Chart Normal
+  // games, or Hard ones if that's nearly all the player has played. "Enough for a trend" counts that group.
+  const normal = games.filter(x => !x.hard), hardG = games.filter(x => x.hard);
+  const pool = normal.length >= 3 || normal.length >= hardG.length ? normal : hardG;
+  const poolName = pool === hardG ? 'Hard' : 'Normal';
+  const fewGames = pool.length < 3;
   $('stBaselinePanel').hidden = !fewGames; $('stTrendPanel').hidden = fewGames;
   $('stTiles').hidden = fewGames; $('stSwitchPanel').hidden = fewGames;   // too little data to mean anything yet
   if (fewGames) {
-    const g0 = games.slice(-games.length);
+    const g0 = pool.length ? pool : games;
     const ppr = Math.round(mean(g0.map(x => x.score / x.rounds)));
     const acc = Math.round(100 * g0.reduce((a, x) => a + x.correct, 0) / Math.max(1, g0.reduce((a, x) => a + x.rounds, 0)));
     const avg = mean(g0.filter(x => x.avgMs).map(x => x.avgMs));
     const cells = [[ppr, 'points per round'], [`${acc}%`, 'accuracy'], [avg ? (avg / 1000).toFixed(2) + 's' : '–', 'avg (correct)']];
     $('stBaseline').replaceChildren(...cells.map(([v, k]) => { const d = document.createElement('div'); const b = document.createElement('b'); b.textContent = v; const sp = document.createElement('span'); sp.textContent = k; d.append(b, sp); return d; }));
-    const left = 3 - games.length;
-    $('stBaselineNote').textContent = `${games.length === 1 ? 'Your first run. ' : ''}Play ${left} more game${left > 1 ? 's' : ''} to see a trend.`;
+    const left = 3 - pool.length;
+    const mixed = normal.length && hardG.length;
+    $('stBaselineNote').textContent = `${games.length === 1 ? 'Your first run. ' : ''}${mixed ? `From your ${poolName} games. ` : ''}Play ${left} more ${mixed ? poolName + ' ' : ''}game${left > 1 ? 's' : ''} to see a trend.`;
   }
-  // Normal and Hard don't belong on one line: Hard has a shorter clock and words/dots. Chart Normal
-  // games, or Hard ones if that's nearly all the player has played.
-  const normal = games.filter(x => !x.hard), hardG = games.filter(x => x.hard);
-  const pool = normal.length >= 2 || normal.length >= hardG.length ? normal : hardG;
   const shownG = pool.slice(-30);
   $('stTrendSub').textContent = `points per round, last ${shownG.length} ${pool === hardG ? 'Hard' : 'Normal'} game${shownG.length > 1 ? 's' : ''}${hardG.length && normal.length ? (pool === normal ? ' · Hard not included' : ' · Normal not included') : ''}`;
   const pts = shownG.map(x => x.score / x.rounds);

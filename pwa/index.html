@@ -30,8 +30,8 @@
 <link rel="preload" href="/fonts/inter-latin.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="/fonts/bricolage-grotesque-latin.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="/fonts/fonts.css">
-<link rel="stylesheet" href="/assets/styles.119e125633.css">
-<script type="module" src="/assets/main.d4854d8d8b.js"></script>
+<link rel="stylesheet" href="/assets/styles.4cd5c1d8bc.css">
+<script type="module" src="/assets/main.ef86fbf043.js"></script>
 </head>
 <body>
 <div class="app">
@@ -134,9 +134,8 @@
             <span class="freeze" id="dayFreeze" title="Streak freezes: each one covers a missed day" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2v20M4.5 6.5l15 11M19.5 6.5l-15 11"/><path d="m9 4 3 2 3-2M9 20l3-2 3 2"/></svg><span id="dayFreezeN">1</span></span>
           </div>
         </div>
-        <div class="week" id="dailyWeek" aria-label="Daily challenges played this week"></div>
         <div id="dailyPlay">
-          <p class="card-sub">The same 20 questions for everyone today. One try, so make it count. <span id="dailyResets"></span></p>
+          <p class="card-sub">The same 20 questions for everyone today. One try.</p>
           <button class="cta" id="dailyBtn">Play today’s challenge</button>
         </div>
         <div id="dailyDone" hidden>
@@ -151,6 +150,8 @@
             Share today’s result
           </button>
         </div>
+        <div class="week" id="dailyWeek" aria-label="Daily challenges played this week"></div>
+        <p class="daily-resets" id="dailyResets"></p>
       </div>
 
       <div class="panel" id="youPanel">

@@ -1010,8 +1010,9 @@ body:not(.daily-open) #dailyBtn { background: var(--surface); color: var(--accen
 .report-reasons + .field-label { margin-top: 4px; }
 
 /* ---------- third pass ---------- */
-/* the returning-home Daily card is now moved in the page itself (see renderDaily), not with order */
-.daily-open #home .scroll > #dailyCard { order: 0; }
+/* returning home: the Daily card is moved in the page itself (see renderDaily). It shares Quick play's
+   order value, so the page order alone decides which comes first, for the eye and for Tab alike. */
+.daily-open #home .scroll > #dailyCard { order: -4; }
 /* headings and the stage take focus on screen changes; they aren't controls, so no ring */
 [tabindex="-1"]:focus { outline: none; }
 
@@ -1032,3 +1033,12 @@ body:not(.daily-open) #dailyBtn { background: var(--surface); color: var(--accen
   .hud.tut ~ .stage .verdict { height: 20px; font-size: 13px; }
 }
 .play-block > .untimed-near { margin-top: -10px; }
+
+/* pause: when Restart isn't offered (Daily, challenges, practice), Quit takes the full row */
+.pause-row:has(> button[hidden]) { grid-template-columns: 1fr; }
+/* pause stats close up when the pauses cell is hidden (practice) */
+.pause-stats { grid-template-columns: none; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); }
+/* Daily card: action first, then the week, then when it resets */
+.daily-resets { margin: -4px 0 0; font-size: 12px; color: var(--muted); text-align: center; }
+/* answer strip: bars keep a sensible width when a run is short (one answer was a full-width slab) */
+.r-strip i { max-width: 28px; }

@@ -3,12 +3,12 @@
 // and old files stay on the server for old tabs. The release script also updates the list below.
 // Offline support: the app shell is cached on install, so the game opens and Classic games
 // play with no connection. Game-server calls always go to the network.
-const VERSION = 'r-f6ecdbb8fa';
+const VERSION = 'r-b6c08379b9';
 const SHELL = `lor-shell-${VERSION}`;
 const FONTS = 'lor-fonts';
 const FILES = [
-  '/', '/assets/styles.119e125633.css', '/manifest.webmanifest',
-  '/assets/main.d4854d8d8b.js', '/assets/core.373fb97d34.js', '/assets/api.85c113d010.js', '/assets/queue.91786d6ba2.js', '/assets/config.6c2d557f76.js', '/privacy', '/assets/doc.2be06cfe06.css',
+  '/', '/assets/styles.4cd5c1d8bc.css', '/manifest.webmanifest',
+  '/assets/main.ef86fbf043.js', '/assets/core.373fb97d34.js', '/assets/api.85c113d010.js', '/assets/queue.91786d6ba2.js', '/assets/config.6c2d557f76.js', '/privacy', '/assets/doc.2be06cfe06.css',
   '/fonts/fonts.css', '/fonts/inter-latin.woff2', '/fonts/inter-latin-ext.woff2', '/fonts/bricolage-grotesque-latin.woff2', '/fonts/bricolage-grotesque-latin-ext.woff2',
   '/icons/icon-192.png', '/icons/icon-512.png', '/icons/maskable-512.png', '/icons/apple-touch-icon.png', '/icons/icon-32.png', '/icons/icon.svg',
 ];
