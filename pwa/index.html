@@ -30,8 +30,8 @@
 <link rel="preload" href="/fonts/inter-latin.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="/fonts/bricolage-grotesque-latin.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="/fonts/fonts.css">
-<link rel="stylesheet" href="/assets/styles.418ba017f8.css">
-<script type="module" src="/assets/main.c84eaa5716.js"></script>
+<link rel="stylesheet" href="/assets/styles.3c9215d829.css">
+<script type="module" src="/assets/main.bc9bc57593.js"></script>
 </head>
 <body>
 <div class="app">
@@ -314,6 +314,11 @@
         <p class="card-sub level-next" id="stLevelNext"></p>
       </div>
       <div class="st-tiles" id="stTiles"></div>
+      <div class="panel baseline-panel" id="stBaselinePanel" hidden>
+        <div class="panel-head"><h2>Your starting point</h2></div>
+        <div class="baseline" id="stBaseline"></div>
+        <p class="card-sub" id="stBaselineNote"></p>
+      </div>
       <div class="panel" id="stTrendPanel">
         <div class="panel-head"><h2>Score trend <span class="sub">points per round, last 30 games</span></h2></div>
         <div class="chart" id="stTrend"></div>
@@ -401,7 +406,11 @@
           <div class="r-strip-head"><span>Every answer</span><span class="r-legend"><i class="ok"></i>right <i class="no"></i>wrong · taller is faster</span></div>
           <div class="r-strip" id="rStrip" role="img" aria-label="Your answers"></div>
           <details class="review" id="rReviewBox">
-            <summary>Review every answer</summary>
+            <summary>Review answers</summary>
+            <div class="seg review-seg" role="group" aria-label="Which answers to show">
+              <button type="button" id="rvMiss" aria-pressed="true">Mistakes</button>
+              <button type="button" id="rvAll" aria-pressed="false">All answers</button>
+            </div>
             <ol class="review-list" id="rReview"></ol>
           </details>
         </div>

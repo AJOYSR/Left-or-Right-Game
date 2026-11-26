@@ -912,10 +912,22 @@ function renderStrip(log) {
   renderReview(log);
 }
 // Every answer, in order: the question, the number, what you pressed and what was right.
+// Mistakes first: that's what people open the review for. "All answers" shows every round in order.
+let reviewLog = [], reviewMode = 'miss';
 function renderReview(log) {
+  if (log) reviewLog = log;
+  const misses = reviewLog.filter(l => !l.ok).length;
+  if (!misses) reviewMode = 'all';
+  else if (log) reviewMode = 'miss';
+  $('rvMiss').textContent = misses ? `Mistakes (${misses})` : 'No mistakes';
+  $('rvMiss').disabled = !misses;
+  $('rvAll').textContent = `All ${reviewLog.length}`;
+  $('rvMiss').setAttribute('aria-pressed', String(reviewMode === 'miss'));
+  $('rvAll').setAttribute('aria-pressed', String(reviewMode === 'all'));
   const box = $('rReview');
   const side = (l, d) => { const t = TYPES[l.type]; if (!t || !d) return '–'; const flipped = l.flip ? (d === 'left' ? 'right' : 'left') : d; return flipped === 'left' ? t.left : t.right; };
-  box.replaceChildren(...log.map((l, i) => {
+  const rows = reviewLog.map((l, i) => [l, i]).filter(([l]) => reviewMode === 'all' || !l.ok);
+  box.replaceChildren(...rows.map(([l, i]) => {
     const li = document.createElement('li');
     li.className = l.ok ? 'ok' : 'no';
     const t = TYPES[l.type];
@@ -926,9 +938,17 @@ function renderReview(log) {
     const m = document.createElement('span'); m.className = 'rv-m'; m.textContent = l.ok ? '✓' : `✗ ${side(l, l.right)}`;
     m.setAttribute('aria-label', l.ok ? 'right' : `wrong, answer was ${side(l, l.right)}`);
     li.append(q, a, m);
+    // a short reason under each mistake, when there's a clear one
+    if (!l.ok) {
+      const why = l.paused ? '' : l.early ? 'Answered before reading it.' : l.d == null ? 'Ran out of time.'
+        : l.flip ? 'The sides were swapped this round.' : l.sw ? 'The rule had just changed.' : '';
+      if (why) { const w = document.createElement('span'); w.className = 'rv-why'; w.textContent = why; li.append(w); }
+    }
     return li;
   }));
 }
+$('rvMiss').addEventListener('click', () => { reviewMode = 'miss'; renderReview(null); });
+$('rvAll').addEventListener('click', () => { reviewMode = 'all'; renderReview(null); });
 const openReview = () => { const d = $('rReviewBox'); if (d.open) { d.open = false; return; } d.open = true; track('review_open'); d.scrollIntoView({ behavior: reduceMotion.matches ? 'auto' : 'smooth', block: 'start' }); };
 $('rStrip').addEventListener('click', openReview);
 $('reviewBtn').addEventListener('click', openReview);
@@ -1366,6 +1386,7 @@ function renderStats() {
   const has = games.length > 0;
   $('stEmpty').hidden = has;
   for (const id of ['stTiles', 'stTrendPanel', 'stSwitchPanel', 'stSplitPanel', 'stLevelPanel']) $(id).hidden = !has;
+  if (!has) $('stBaselinePanel').hidden = true;
   if (!has) return;
   const totalQ = games.reduce((a, x) => a + x.rounds, 0), totalC = games.reduce((a, x) => a + x.correct, 0);
   const avgAll = mean(games.filter(x => x.avgMs).map(x => x.avgMs));
@@ -1373,6 +1394,20 @@ function renderStats() {
     [avgAll ? (avgAll / 1000).toFixed(2) + 's' : '–', 'Avg (correct answers)'], [dayStreak(dailyHistory()), 'Daily streak']];
   $('stTiles').replaceChildren(...tiles.map(([v, k]) => { const d = document.createElement('div'); const b = document.createElement('b'); b.textContent = v; const s = document.createElement('span'); s.textContent = k; d.append(b, s); return d; }));
 
+  // With only a game or two, a trend chart is a dot. Show the starting point instead.
+  const fewGames = games.length < 3;
+  $('stBaselinePanel').hidden = !fewGames; $('stTrendPanel').hidden = fewGames;
+  $('stTiles').hidden = fewGames; $('stSwitchPanel').hidden = fewGames;   // too little data to mean anything yet
+  if (fewGames) {
+    const g0 = games.slice(-games.length);
+    const ppr = Math.round(mean(g0.map(x => x.score / x.rounds)));
+    const acc = Math.round(100 * g0.reduce((a, x) => a + x.correct, 0) / Math.max(1, g0.reduce((a, x) => a + x.rounds, 0)));
+    const avg = mean(g0.filter(x => x.avgMs).map(x => x.avgMs));
+    const cells = [[ppr, 'points per round'], [`${acc}%`, 'accuracy'], [avg ? (avg / 1000).toFixed(2) + 's' : '–', 'avg (correct)']];
+    $('stBaseline').replaceChildren(...cells.map(([v, k]) => { const d = document.createElement('div'); const b = document.createElement('b'); b.textContent = v; const sp = document.createElement('span'); sp.textContent = k; d.append(b, sp); return d; }));
+    const left = 3 - games.length;
+    $('stBaselineNote').textContent = `This is what you’ll be measured against. Play ${left} more game${left > 1 ? 's' : ''} and it turns into a trend.`;
+  }
   const pts = games.slice(-30).map(x => x.score / x.rounds);
   const W = 320, H = 130, L = 26, R = 30, T = 10, B = 18;
   const maxY = Math.max(50, Math.ceil(Math.max(...pts) / 50) * 50);

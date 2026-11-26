@@ -886,3 +886,26 @@ body:not(.daily-open) #dailyBtn { background: var(--surface); color: var(--accen
 .narrow .demo-side { font-size: 13px; padding: 6px 10px; gap: 4px; }
 .board li:has(.row-more) { grid-template-columns: 28px 28px minmax(0, 1fr) auto 28px; }
 .row-more { width: 28px; margin-right: -4px; }
+/* review: mistakes first */
+.review-seg { margin: 4px 0 2px; }
+.review-seg button:disabled { opacity: .5; cursor: default; }
+.review-list li { grid-template-columns: 1fr auto auto; }
+.rv-why { grid-column: 1 / -1; font-size: 12px; color: var(--muted); margin-top: -2px; }
+/* stats: starting point */
+.baseline { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 10px; }
+.baseline > div { background: var(--surface-2); border-radius: 12px; padding: 12px; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.baseline b { font-family: var(--display); font-size: 22px; font-variant-numeric: tabular-nums; }
+.baseline span { font-size: 12px; color: var(--muted); }
+/* small screens and large text: tighter home so Quick play sits comfortably on the first screen */
+.short #home .scroll { gap: 14px; }
+.short .hero { gap: 6px; padding-top: 0; }
+.short .hero h1 { font-size: 27px; line-height: 1.04; }
+.short .hero > p#heroSub { font-size: 15px; }
+.short .hero-demo { margin-top: 2px; }
+.short .demo-num { font-size: 46px; }
+.short .demo-side { font-size: 13px; padding: 5px 10px; }
+.short .hero-demo-cap { display: none; }
+.short .cta-play { padding: 12px 16px; }
+.short .cta-main { font-size: 18px; }
+.short #home > .bar { min-height: 36px; }
+.short .icon-btn { width: 36px; height: 36px; }

@@ -82,5 +82,19 @@
    "styles.css": "styles.418ba017f8.css",
    "doc.css": "doc.2be06cfe06.css"
   }
+ },
+ {
+  "release": "3529daf7df",
+  "at": "2026-11-26T14:18:18.697Z",
+  "files": {
+   "config.js": "config.6c2d557f76.js",
+   "core.js": "core.373fb97d34.js",
+   "queue.js": "queue.91786d6ba2.js",
+   "api.js": "api.85c113d010.js",
+   "main.js": "main.bc9bc57593.js",
+   "admin.js": "admin.48843940de.js",
+   "styles.css": "styles.3c9215d829.css",
+   "doc.css": "doc.2be06cfe06.css"
+  }
  }
 ]
