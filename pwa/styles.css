@@ -1001,3 +1001,34 @@ body:not(.daily-open) #dailyBtn { background: var(--surface); color: var(--accen
 .empty .empty-cta { margin-top: 10px; }
 .level-row:has(+ .you-row[hidden]) { margin-bottom: 0; }
 .empty .empty-cta { color: var(--ink); }
+
+/* form sheets (report, nickname): a label sits 8px from its own control, 14px from everything else.
+   A fieldset's legend isn't part of the flex layout, so it gets its spacing explicitly, and loses
+   the browser's default side padding that indented it. */
+.sheet .field-label { margin-bottom: -6px; }
+.sheet legend.field-label { display: block; padding: 0; margin: 0 0 8px; }
+.report-reasons + .field-label { margin-top: 4px; }
+
+/* ---------- third pass ---------- */
+/* the returning-home Daily card is now moved in the page itself (see renderDaily), not with order */
+.daily-open #home .scroll > #dailyCard { order: 0; }
+/* headings and the stage take focus on screen changes; they aren't controls, so no ring */
+[tabindex="-1"]:focus { outline: none; }
+
+/* pad hints: 80% white on the pink pad was 3.92:1; 92% passes on both pads (4.6:1+) */
+.pad small { opacity: .92; }
+
+/* untimed practice, beside Quick play for first-time players (returning players have it in the footer) */
+.untimed-near { align-self: center; font-size: 13px; color: var(--muted); font-weight: 500; min-height: 32px; }
+.returning .untimed-near { display: none; }
+
+/* phones on their side, in practice: smaller dial and tighter coach so the instructions stay on screen */
+@media (orientation: landscape) and (max-height: 500px) {
+  .hud.tut ~ .stage { gap: 6px; justify-content: flex-start; }
+  .hud.tut ~ .stage .prompt { font-size: 18px; }
+  .hud.tut ~ .stage .prompt .chip { font-size: 13px; padding: 3px 10px; }
+  .hud.tut ~ .stage .dial { width: min(62cqw, 260px, 30cqh); }
+  .hud.tut ~ .stage .coach { font-size: 13px; line-height: 1.35; padding: 6px 10px; }
+  .hud.tut ~ .stage .verdict { height: 20px; font-size: 13px; }
+}
+.play-block > .untimed-near { margin-top: -10px; }

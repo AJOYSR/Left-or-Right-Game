@@ -30,8 +30,8 @@
 <link rel="preload" href="/fonts/inter-latin.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="/fonts/bricolage-grotesque-latin.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="/fonts/fonts.css">
-<link rel="stylesheet" href="/assets/styles.37a744cdcf.css">
-<script type="module" src="/assets/main.7bec0a7cf4.js"></script>
+<link rel="stylesheet" href="/assets/styles.119e125633.css">
+<script type="module" src="/assets/main.d4854d8d8b.js"></script>
 </head>
 <body>
 <div class="app">
@@ -119,6 +119,7 @@
           </div>
           <p class="level-info" id="levelInfo" hidden>Hard: the timer shrinks to 1.5 s; from a quarter of the way in, numbers can show as words or dots; from halfway, the sides sometimes swap.</p>
         </details>
+        <button class="link untimed-near" id="untimedNearBtn" type="button">Practise without a timer</button>
       </div>
 
       <div class="panel daily-card" id="dailyCard">
@@ -298,8 +299,8 @@
     </div>
 
     <div class="pads">
-      <button class="pad l" id="padL" aria-label="ODD, left"><span id="padLText">ODD</span><small><span class="touch-only">← swipe left</span><span class="kbd-only">← key</span></small></button>
-      <button class="pad r" id="padR" aria-label="EVEN, right"><span id="padRText">EVEN</span><small><span class="touch-only">swipe right →</span><span class="kbd-only">→ key</span></small></button>
+      <button class="pad l" id="padL"><span id="padLText">ODD</span><span class="sr-only">, left</span><small aria-hidden="true"><span class="touch-only">← swipe left</span><span class="kbd-only">← key</span></small></button>
+      <button class="pad r" id="padR"><span id="padRText">EVEN</span><span class="sr-only">, right</span><small aria-hidden="true"><span class="touch-only">swipe right →</span><span class="kbd-only">→ key</span></small></button>
     </div>
   </section>
 
@@ -330,7 +331,7 @@
         <p class="card-sub" id="stBaselineNote"></p>
       </div>
       <div class="panel" id="stTrendPanel">
-        <div class="panel-head"><h2>Score trend <span class="sub">points per round, last 30 games</span></h2></div>
+        <div class="panel-head"><h2>Score trend <span class="sub" id="stTrendSub">points per round, last 30 games</span></h2></div>
         <div class="chart" id="stTrend"></div>
       </div>
       <div class="panel" id="stSwitchPanel">

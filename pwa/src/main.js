@@ -48,6 +48,13 @@ const show = name => {
   const blocks = [...el.querySelectorAll(':scope > .bar, :scope > .hud, :scope > .scroll > *, :scope > .dock, :scope > .pads')];
   blocks.forEach((b, i) => { b.classList.add('stagger'); b.style.setProperty('--i', i); });
   bump(el, 'enter');
+  // Focus follows the screen: otherwise it stays on a button in the screen that was just hidden.
+  // The game screen is played with keys/pads anywhere, so it takes focus on its stage.
+  const target = name === 'game' ? $('stage') : el.querySelector('h1') || el.querySelector('.bar .brand') || el.querySelector('h2');
+  if (target && document.activeElement !== target) {
+    if (!target.hasAttribute('tabindex')) target.setAttribute('tabindex', '-1');
+    target.focus({ preventScroll: true });
+  }
   for (const id of ['board', 'board2', 'cBoard']) {
     const ol = $(id); bump(ol, 'rows-in');
     clearTimeout(ol._t); ol._t = setTimeout(() => ol.classList.remove('rows-in'), 1200);
@@ -168,6 +175,23 @@ function setMenu(open) {
 $('settingsBtn').addEventListener('click', e => { e.stopPropagation(); setMenu($('settingsMenu').hidden); });
 document.addEventListener('click', e => { if (!$('settingsMenu').hidden && !e.target.closest('.menu-wrap')) setMenu(false); });
 document.addEventListener('keydown', e => { if (e.key === 'Escape' && !$('settingsMenu').hidden) { setMenu(false); $('settingsBtn').focus(); } });
+// role="menu" promises arrow keys: Up/Down move (wrapping), Home/End jump, Tab closes the menu
+$('settingsMenu').addEventListener('keydown', e => {
+  const items = [...$('settingsMenu').querySelectorAll('.menu-item:not([hidden])')];
+  const i = items.indexOf(document.activeElement);
+  const go = n => { e.preventDefault(); items[(n + items.length) % items.length].focus(); };
+  if (e.key === 'ArrowDown') go(i + 1);
+  else if (e.key === 'ArrowUp') go(i < 0 ? items.length - 1 : i - 1);
+  else if (e.key === 'Home') go(0);
+  else if (e.key === 'End') go(items.length - 1);
+  else if (e.key === 'Tab') setMenu(false);
+});
+$('settingsBtn').addEventListener('keydown', e => {
+  if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
+  e.preventDefault(); setMenu(true);
+  const items = $('settingsMenu').querySelectorAll('.menu-item');
+  items[e.key === 'ArrowDown' ? 0 : items.length - 1].focus();
+});
 $('howMenuBtn').addEventListener('click', () => { setMenu(false); startTutorial(hard ? HARD_TUTORIAL : TUTORIAL); });
 applySize();
 
@@ -437,7 +461,7 @@ function setPads(q) {
   $('padLText').textContent = L; $('padRText').textContent = R;
   $('pL').textContent = L; $('pR').textContent = R;
   $('padL').className = 'pad l'; $('padR').className = 'pad r';
-  $('padL').setAttribute('aria-label', `${L}, left`); $('padR').setAttribute('aria-label', `${R}, right`);
+
   const swapped = !!(q && q.flip);
   $('swapTag').hidden = !swapped;
 }
@@ -997,7 +1021,12 @@ let reviewExpanded = false;
 $('rvMore').addEventListener('click', () => { reviewExpanded = true; renderReview(null); });
 $('rvMiss').addEventListener('click', () => { reviewMode = 'miss'; reviewExpanded = false; renderReview(null); });
 $('rvAll').addEventListener('click', () => { reviewMode = 'all'; reviewExpanded = false; renderReview(null); });
-const openReview = () => { const d = $('rReviewBox'); if (d.open) { d.open = false; return; } d.open = true; track('review_open'); d.scrollIntoView({ behavior: reduceMotion.matches ? 'auto' : 'smooth', block: 'start' }); };
+const openReview = () => {
+  const d = $('rReviewBox'); if (d.open) { d.open = false; return; }
+  d.open = true; track('review_open');
+  d.scrollIntoView({ behavior: reduceMotion.matches ? 'auto' : 'smooth', block: 'start' });
+  focusKbd([$('rvMiss'), $('rvAll')].find(b => !b.disabled && b.getAttribute('aria-pressed') === 'true') || $('rvAll'));
+};
 $('rStrip').addEventListener('click', openReview);
 $('reviewBtn').addEventListener('click', openReview);
 
@@ -1027,7 +1056,8 @@ function takeaway(run) {
   if (flip >= 2) cands.push({ n: flip, t: `${flip} misses were on swapped sides. When the sides swap, follow the words on the pads, not habit.` });
   if (sw.length >= 3 && rp.length >= 3 && rate(rp) - rate(sw) >= 0.2) {
     const m = sw.filter(l => !l.ok).length;
-    cands.push({ n: m, t: `Most misses came right after the rule changed (${m} of ${sw.length} switch questions). Check the rule before the number.` });
+    const mr = rp.filter(l => !l.ok).length;
+    cands.push({ n: m, t: `You missed ${m} of ${sw.length} questions right after the rule changed, against ${mr} of ${rp.length} when it stayed the same. Check the rule before the number.` });
   }
   if (par.length && siz.length && Math.abs(rate(par) - rate(siz)) >= 0.15) {
     const [weak, wl, strong, sl] = rate(par) < rate(siz) ? ['Odd/Even', par, 'Low/High', siz] : ['Low/High', siz, 'Odd/Even', par];
@@ -1061,6 +1091,7 @@ function goHome() {
 $('playBtn').addEventListener('click', () => play({ mode: 'classic' }));
 $('howBtn').addEventListener('click', () => startTutorial(hard ? HARD_TUTORIAL : TUTORIAL));
 $('untimedBtn').addEventListener('click', () => startPractice());
+$('untimedNearBtn').addEventListener('click', () => startPractice());
 // Skip and Ready continue to whatever the player came for (their Daily, a friend's challenge, or Classic).
 $('skipBtn').addEventListener('click', () => {
   if (!g || !g.tutorial) return;
@@ -1365,7 +1396,13 @@ function renderDaily() {
   }));
   const mine = hist[todayKey];
   // returning players who haven't played today: the Daily is the main thing on the page
-  document.body.classList.toggle('daily-open', mine == null && document.body.classList.contains('returning'));
+  const dailyFirst = mine == null && document.body.classList.contains('returning');
+  document.body.classList.toggle('daily-open', dailyFirst);
+  // move the card in the page itself, not just visually, so Tab and screen readers meet it first too
+  const card = $('dailyCard'), block = $('playBlock');
+  if (dailyFirst ? card.nextElementSibling !== block : block.nextElementSibling !== card) {
+    if (dailyFirst) block.before(card); else block.after(card);
+  }
   $('dailyPlay').hidden = mine != null;
   $('dailyDone').hidden = mine == null;
   const prog = dailyProgress();
@@ -1507,9 +1544,15 @@ function renderStats() {
     const cells = [[ppr, 'points per round'], [`${acc}%`, 'accuracy'], [avg ? (avg / 1000).toFixed(2) + 's' : '–', 'avg (correct)']];
     $('stBaseline').replaceChildren(...cells.map(([v, k]) => { const d = document.createElement('div'); const b = document.createElement('b'); b.textContent = v; const sp = document.createElement('span'); sp.textContent = k; d.append(b, sp); return d; }));
     const left = 3 - games.length;
-    $('stBaselineNote').textContent = `This is what you’ll be measured against. Play ${left} more game${left > 1 ? 's' : ''} and it turns into a trend.`;
+    $('stBaselineNote').textContent = `${games.length === 1 ? 'Your first run. ' : ''}Play ${left} more game${left > 1 ? 's' : ''} to see a trend.`;
   }
-  const pts = games.slice(-30).map(x => x.score / x.rounds);
+  // Normal and Hard don't belong on one line: Hard has a shorter clock and words/dots. Chart Normal
+  // games, or Hard ones if that's nearly all the player has played.
+  const normal = games.filter(x => !x.hard), hardG = games.filter(x => x.hard);
+  const pool = normal.length >= 2 || normal.length >= hardG.length ? normal : hardG;
+  const shownG = pool.slice(-30);
+  $('stTrendSub').textContent = `points per round, last ${shownG.length} ${pool === hardG ? 'Hard' : 'Normal'} game${shownG.length > 1 ? 's' : ''}${hardG.length && normal.length ? (pool === normal ? ' · Hard not included' : ' · Normal not included') : ''}`;
+  const pts = shownG.map(x => x.score / x.rounds);
   const W = 320, H = 130, L = 26, R = 30, T = 10, B = 18;
   const maxY = Math.max(50, Math.ceil(Math.max(...pts) / 50) * 50);
   const xAt = i => L + (pts.length === 1 ? (W - L - R) / 2 : (i * (W - L - R)) / (pts.length - 1));

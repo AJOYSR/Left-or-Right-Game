@@ -124,5 +124,19 @@
    "styles.css": "styles.37a744cdcf.css",
    "doc.css": "doc.2be06cfe06.css"
   }
+ },
+ {
+  "release": "f6ecdbb8fa",
+  "at": "2026-11-26T15:19:48.490Z",
+  "files": {
+   "config.js": "config.6c2d557f76.js",
+   "core.js": "core.373fb97d34.js",
+   "queue.js": "queue.91786d6ba2.js",
+   "api.js": "api.85c113d010.js",
+   "main.js": "main.d4854d8d8b.js",
+   "admin.js": "admin.48843940de.js",
+   "styles.css": "styles.119e125633.css",
+   "doc.css": "doc.2be06cfe06.css"
+  }
  }
 ]
