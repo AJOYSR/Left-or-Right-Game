@@ -27,11 +27,12 @@
 <meta property="og:image:height" content="630">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:image" content="https://left-or-right-peach.vercel.app/api/og">
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800&family=Inter:wght@400;500;600&display=swap">
+<link rel="preload" href="/fonts/inter-latin.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="/fonts/bricolage-grotesque-latin.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/fonts/fonts.css">
 <link rel="stylesheet" href="/styles.css">
 <script type="module" src="/src/main.js"></script>
+<script defer src="/_vercel/insights/script.js"></script>
 </head>
 <body>
 <div class="app">
@@ -55,6 +56,7 @@
           <button class="menu-item" id="themeBtn" role="menuitem"><svg viewBox="0 0 24 24" id="themeIcon"></svg><span id="themeLabel">Dark mode</span></button>
           <button class="menu-item" id="soundBtn" role="menuitem"><svg viewBox="0 0 24 24" id="soundIcon"></svg><span id="soundLabel">Sound on</span></button>
           <button class="menu-item" id="sizeBtn" role="menuitem"><svg viewBox="0 0 24 24"><path d="M4 18 9 6l5 12"/><path d="M5.8 14h6.4"/><path d="M15 18l3-7 3 7"/><path d="M16 16h4"/></svg><span id="sizeLabel">Text size: normal</span></button>
+          <button class="menu-item" id="remindBtn" role="menuitem"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 8a6 6 0 1 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.9 1.9 0 0 0 3.4 0"/></svg><span id="remindLabel">Daily reminder: off</span></button>
           <div class="menu-sep" role="separator"></div>
           <button class="menu-item" id="howMenuBtn" role="menuitem"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.6.3-1 .9-1 1.6v.4"/><path d="M12 17.5v.01"/></svg><span>How to play</span></button>
         </div>
@@ -89,6 +91,7 @@
           <div class="streak-pill" id="dayStreak" hidden title="Days in a row">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2c1 3.5 5 6 5 11a5 5 0 0 1-10 0c0-2.2 1-3.8 2.4-5 .2 1.7 1 2.8 2.1 3.2C11 8.6 11.3 5 12 2Z"/></svg>
             <span class="pill-k"><span id="dayStreakN">0</span>-day streak</span>
+            <span class="freeze" id="dayFreeze" title="Streak freezes: each one covers a missed day" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2v20M4.5 6.5l15 11M19.5 6.5l-15 11"/><path d="m9 4 3 2 3-2M9 20l3-2 3 2"/></svg><span id="dayFreezeN">1</span></span>
           </div>
         </div>
         <div class="week" id="dailyWeek" aria-label="Daily challenges played this week"></div>
@@ -102,6 +105,7 @@
             <div><b id="dailyRank">–</b><span>Today’s rank</span></div>
             <div><b id="dailyNext">–</b><span>Next challenge</span></div>
           </div>
+          <button class="ghost share-btn" id="dailyRemindBtn" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 8a6 6 0 1 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.9 1.9 0 0 0 3.4 0"/></svg> Remind me tomorrow</button>
           <button class="ghost share-btn" id="dailyShareBtn">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12"/><path d="m7 8 5-5 5 5"/><path d="M5 13v6a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-6"/></svg>
             Share today’s result
@@ -123,7 +127,11 @@
       </div>
 
       <div class="panel" id="youPanel">
-        <div class="panel-head"><h2>You</h2><span class="status" id="youStatus"></span></div>
+        <div class="panel-head"><h2>You</h2><span class="status" id="youStatus"></span><button class="link" id="youNameBtn" hidden>Pick a name</button></div>
+        <div class="level-row" id="levelRow">
+          <div class="level-top"><b id="levelName">Level 1 · Rookie</b><span id="levelXp">0 / 300 XP</span></div>
+          <div class="level-bar"><i id="levelFill"></i></div>
+        </div>
         <div class="you-row">
           <div class="you-stat"><div class="v" id="youBest">–</div><div class="k" id="youBestK">Best score</div></div>
           <div class="you-stat"><div class="v" id="youRank">–</div><div class="k">Rank</div></div>
@@ -169,7 +177,7 @@
     </div>
     <p class="level-info" id="levelInfo" hidden>Hard: the timer shrinks to 1.5 s, sides sometimes swap, and numbers can show as words or dots.</p>
     <button class="cta" id="playBtn">Play 20 rounds</button>
-    <div class="hint"><button class="link" id="howBtn">How to play</button><span class="kbd-only"> · Play with <kbd>←</kbd> <kbd>→</kbd> or <kbd>A</kbd> <kbd>D</kbd></span></div>
+    <div class="hint"><button class="link" id="howBtn">How to play</button> · <a class="link" href="/privacy">Privacy</a><span class="kbd-only"> · Play with <kbd>←</kbd> <kbd>→</kbd> or <kbd>A</kbd> <kbd>D</kbd></span></div>
     </div>
   </section>
 
@@ -286,6 +294,19 @@
             </div>
           </div>
         </details>
+        <div class="danger-zone">
+          <button class="ghost small danger" id="deleteMeBtn" type="button">Delete my player</button>
+          <span class="muted" id="deleteMeNote">Removes your nickname, games and reminders for good.</span>
+        </div>
+      </div>
+      <div class="panel" id="stLevelPanel">
+        <div class="panel-head"><h2>Level <span class="sub" id="stLevelSub"></span></h2></div>
+        <div class="level-bar big"><i id="stLevelFill"></i></div>
+        <p class="card-sub level-next" id="stLevelNext"></p>
+      </div>
+      <div class="panel" id="stBadgesPanel">
+        <div class="panel-head"><h2>Badges <span class="sub" id="stBadgeCount"></span></h2></div>
+        <div class="badges" id="stBadges"></div>
       </div>
       <div class="st-tiles" id="stTiles"></div>
       <div class="panel" id="stTrendPanel">
@@ -317,6 +338,7 @@
           <div class="label" id="rLabel">Score</div>
           <div class="big" id="rScore">0</div>
           <span class="badge" id="rBadge" hidden></span>
+          <div class="xp-line" id="rXp" hidden></div>
         </div>
         <div class="r-stats">
           <div><b id="rCorrect">0/20</b><span>Correct</span></div>
@@ -331,6 +353,17 @@
         <div class="r-split" id="rSplitBars"></div>
         <p class="r-note" id="rSplit" hidden></p>
       </div>
+
+      <form class="panel save-name" id="saveName" novalidate hidden>
+        <div class="eyebrow">Save your score</div>
+        <h2>Put your name on the leaderboard</h2>
+        <p class="card-sub">You’re playing as <b id="guestName">Guest</b>. Pick a name so friends can find you.</p>
+        <div class="code-row">
+          <input id="saveNameInput" class="field" maxlength="20" autocomplete="nickname" spellcheck="false" placeholder="Your nickname" aria-label="Nickname">
+          <button class="cta small-cta" id="saveNameBtn" type="submit">Save</button>
+        </div>
+        <p class="field-error" id="saveNameError" hidden></p>
+      </form>
 
       <div class="r-actions">
         <button class="action" id="shareBtn">

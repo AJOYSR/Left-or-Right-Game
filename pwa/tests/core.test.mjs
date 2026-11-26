@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   Run, buildQuestions, sideFor, valueLabel, pointsFor, minimumDurationMs, parseCode, challengeCode,
   dayNumber, addDays, MAX_PAUSES, BASE_LIMIT, HARD_END_LIMIT, NUMBERS, timingCheck, cleanNickname,
+  isOffensive, streakInfo, levelInfo, badgeState,
 } from '../src/core.js';
 
 const play = (run, pick) => { while (!run.done) { const q = run.next(); const r = pick(q, run); if (r === 'skip') run.skip(); else run.answer(r.d, r.ms); } return run; };
@@ -124,6 +125,35 @@ test('nicknames are cleaned and checked', () => {
   assert.equal(cleanNickname('<script>').ok, false);
   assert.equal(cleanNickname('Admin').ok, false);
   assert.equal(cleanNickname('x'.repeat(21)).ok, false);
+});
+
+test('offensive nicknames are blocked without catching ordinary names', () => {
+  for (const bad of ['fuck', 'F.u.c.k', 'sh1t head', 'B1TCH', 'big ass', 'kkk', 'FUUUCK']) assert.equal(isOffensive(bad), true, bad);
+  for (const ok of ['Cassidy', 'Scunthorpe', 'Hemi', 'Classic Lass', 'Dickens fan', 'Tāne', 'Essex', 'The Therapist']) assert.equal(isOffensive(ok), false, ok);
+  assert.equal(cleanNickname('sh1thead').ok, false);
+  assert.equal(cleanNickname('Cassidy').ok, true);
+});
+
+test('streak freezes cover a missed day after 7 in a row', () => {
+  const run = (start, n) => Array.from({ length: n }, (_, i) => addDays(start, i));
+  const week = run('2026-12-01', 7);                       // 1st to 7th: earns one freeze
+  assert.deepEqual(streakInfo(week, '2026-12-07'), { streak: 7, freezes: 1, usedOn: [], alive: true });
+  const withGap = [...week, '2026-12-09'];                 // missed the 8th
+  const s = streakInfo(withGap, '2026-12-09');
+  assert.equal(s.streak, 8); assert.equal(s.freezes, 0); assert.deepEqual(s.usedOn, ['2026-12-08']);
+  assert.equal(streakInfo([...run('2026-12-01', 3), '2026-12-05'], '2026-12-05').streak, 1);   // no freeze yet: resets
+  assert.equal(streakInfo(week, '2026-12-08').alive, true);   // yesterday counts
+  assert.equal(streakInfo(week, '2026-12-09').alive, true);   // freeze keeps it alive
+  assert.equal(streakInfo(week, '2026-12-10').alive, false);  // two missed days, one freeze
+});
+
+test('levels and badges', () => {
+  assert.equal(levelInfo(0).level, 1);
+  assert.equal(levelInfo(3000).level, 2);
+  assert.ok(levelInfo(100000).level > levelInfo(50000).level);
+  const games = [{ mode: 'classic', rounds: 15, hard: false, correct: 15, avgMs: 480 }, { mode: 'daily', day: '2026-12-01', rounds: 20, correct: 18, avgMs: 600 }];
+  const earned = badgeState(games, '2026-12-01').filter(b => b.earned).map(b => b.id);
+  assert.deepEqual(earned.sort(), ['first', 'perfect', 'speed'].sort());
 });
 
 test('challenge codes and Daily numbers', () => {

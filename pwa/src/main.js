@@ -1,6 +1,7 @@
 import {
   Run, ROUND_OPTIONS, BASE_LIMIT, MAX_PAUSES, MIN_MS, MAX_PER_ROUND, DAILY_ROUNDS, TYPES,
   sideFor, valueLabel, makeQuestion, newSeed, parseCode, dayKey, keyToDate, dayNumber, addDays, cleanNickname,
+  streakInfo, levelInfo, badgeState,
 } from './core.js';
 import { api, ApiError, store, getToken, setToken, pending } from './api.js';
 
@@ -10,6 +11,17 @@ const mean = a => (a.length ? a.reduce((x, y) => x + y, 0) / a.length : null);
 const byScore = (a, b) => (b.score || 0) - (a.score || 0) || (a.avgMs ?? 1e9) - (b.avgMs ?? 1e9);
 const plausible = total => r => (r.score || 0) <= total * MAX_PER_ROUND && (r.avgMs == null || r.avgMs >= MIN_MS);
 let todayKey = dayKey();
+
+// ================= error reporting =================
+// Problems on players' devices are sent to the server (at most 5 per visit), so they can be fixed.
+let reported = 0;
+function report(message, stack) {
+  if (reported >= 5 || !message) return;
+  reported++;
+  api('logError', { message: String(message).slice(0, 500), stack: String(stack || '').slice(0, 2000), url: location.pathname }).catch(() => {});
+}
+addEventListener('error', e => report(e.message, e.error && e.error.stack));
+addEventListener('unhandledrejection', e => report(e.reason && (e.reason.message || String(e.reason)), e.reason && e.reason.stack));
 
 // ================= screens & helpers =================
 const $ = id => document.getElementById(id);
@@ -171,12 +183,21 @@ $('nickForm').addEventListener('submit', async e => {
 $('nickClose').addEventListener('click', () => { $('nickScrim').hidden = true; afterNick = null; });
 $('nickOffline').addEventListener('click', () => { $('nickScrim').hidden = true; const next = afterNick; afterNick = null; next && next({ offline: true }); });
 
-// Needs a player for anything posted. Calls fn() once there is one (or with {offline:true}).
-function withPlayer(fn) {
-  if (getToken()) return fn();
-  if (!online) return fn({ offline: true });
-  askNickname(fn);
+// Play first: new players get a guest account without being asked anything, and pick a
+// nickname after their first game. Calls fn() once there is a player (or with {offline:true}).
+async function ensurePlayer() {
+  if (getToken()) return true;
+  if (!online) return false;
+  try {
+    const r = await api('register', { guest: true });
+    setToken(r.token); me = r.player; store.set('me', me);
+    return true;
+  } catch (e) {
+    toast(e.status === 429 ? e.message : 'Couldn’t reach the server, so this game stays on this device.');
+    return false;
+  }
 }
+function withPlayer(fn) { ensurePlayer().then(ok => fn(ok ? undefined : { offline: true })); }
 
 // ================= game state =================
 const RING_LEN = 2 * Math.PI * 46;
@@ -187,12 +208,9 @@ let roundTimer = 0, raf = 0, nextTimer = 0, countTimer = 0;
 // ---------- practice ----------
 const TUTORIAL = [
   { type: 'parity', n: 6, coach: '<b>Odd or Even?</b> 6 is even, and even goes <b>right</b>. Swipe right, tap EVEN or press →.' },
-  { type: 'parity', n: 3, coach: '3 is odd, and odd goes <b>left</b>. Swipe left, tap ODD or press ←.' },
-  { type: 'size', n: 7, coach: 'The question changed to <b>Low or High?</b> 7 is above 5, so it’s high. High goes <b>right</b>.' },
-  { type: 'size', n: 2, coach: '2 is below 5, so it’s low. Low goes <b>left</b>.' },
-  { timed: true, coach: 'Now with the <b>3-second timer</b>. Read the question first, it can switch.' },
-  { timed: true, coach: 'Odd and low go left. Even and high go right.' },
-  { timed: true, coach: 'Last practice one.' },
+  { type: 'size', n: 3, coach: 'Now it’s <b>Low or High?</b> 3 is below 5, so it’s low. Low goes <b>left</b>.' },
+  { timed: true, coach: 'Now with the <b>3-second timer</b>. Read the question first: it can switch.' },
+  { timed: true, coach: 'Odd and low go left. Even and high go right. Last one!' },
 ];
 const HARD_TUTORIAL = [
   { type: 'parity', n: 4, flip: true, coach: '<b>Sides swapped.</b> 4 is even, but this round EVEN sits on the <b>left</b>. Follow the labels, not habit.' },
@@ -518,6 +536,7 @@ $('stage').addEventListener('pointercancel', () => { tracking = false; });
 let lastRun = null;
 
 async function finish(ended) {
+  const before = { level: levelInfo(totalScore()).level, badges: earnedBadges() };
   const s = g.run.summary();
   const run = {
     mode: g.mode, gameId: g.gameId, rounds: g.rounds, hard: g.hard, seed: g.seed, code: g.code, day: g.day,
@@ -562,6 +581,17 @@ async function finish(ended) {
   } else {
     $('saveStatus').textContent = 'Offline game: saved on this device';
   }
+  celebrate(before);
+}
+
+// After a game: say so when a level or badge is reached.
+function celebrate(before) {
+  const msgs = [];
+  const L = levelInfo(totalScore());
+  if (L.level > before.level) msgs.push(`Level up! You’re now level ${L.level} · ${L.title}`);
+  const now = badgeState(statGames(), todayKey);
+  for (const b of now) if (b.earned && !before.badges.has(b.id)) msgs.push(`Badge earned: ${b.name}`);
+  msgs.forEach((m, i) => setTimeout(() => { toast(m); beep(990 + i * 120, 0.12, 'triangle'); }, 1400 + i * 2700));
 }
 
 function renderResults(run, { skipCount = false } = {}) {
@@ -574,6 +604,11 @@ function renderResults(run, { skipCount = false } = {}) {
     run.dayStreak = streak;
     badgeText = streak > 1 ? `${streak}-day streak` : 'Streak started. Come back tomorrow';
   }
+  $('rXp').hidden = !run.score;
+  $('rXp').textContent = `+${Math.floor(run.score / 10).toLocaleString()} XP`;
+  // guests: offer to put a name on this score
+  $('saveName').hidden = !(me && me.guest && run.gameId);
+  if (me && me.guest) $('guestName').textContent = me.nickname;
   $('rLabel').textContent = run.mode === 'daily' ? `Daily #${dayNumber(run.day)}` : run.mode === 'challenge' ? 'Challenge score' : `Score · ${run.rounds} rounds${run.hard ? ' · Hard' : ''}`;
   if (!skipCount) countUp($('rScore'), run.score);
   $('rCorrect').textContent = `${run.correct}/${run.rounds}`;
@@ -685,11 +720,9 @@ function dailyHistory() {
   for (const x of gameHistory) if (x.mode === 'daily' && x.day) h[x.day] = Math.max(h[x.day] ?? 0, x.score);
   return h;
 }
-function dayStreak(hist) {
-  let k = hist[todayKey] != null ? todayKey : addDays(todayKey, -1), n = 0;
-  while (hist[k] != null) { n++; k = addDays(k, -1); }
-  return n;
-}
+// Streaks forgive one missed day per freeze (earned every 7 Dailies in a row).
+const streakNow = (hist = dailyHistory()) => streakInfo(Object.keys(hist).filter(k => hist[k] != null), todayKey);
+function dayStreak(hist) { return streakNow(hist).streak; }
 
 async function refreshBoards() {
   renderAll();
@@ -806,7 +839,15 @@ function renderResultsBoard() {
   renderList('board2', 'boardEmpty2', data, 5);
   if (!lastRun.gameId) { $('boardEmpty2').hidden = false; $('boardEmpty2').textContent = 'This was an offline game, so it isn’t on the leaderboard.'; }
 }
+const totalScore = () => statGames().reduce((a, g2) => a + (g2.score || 0), 0);
+const earnedBadges = () => new Set(badgeState(statGames(), todayKey).filter(b => b.earned).map(b => b.id));
+
 function renderYou() {
+  const L = levelInfo(totalScore());
+  $('levelName').textContent = `Level ${L.level} · ${L.title}`;
+  $('levelXp').textContent = `${L.into.toLocaleString()} / ${L.need.toLocaleString()} XP`;
+  $('levelFill').style.width = `${Math.round(L.progress * 100)}%`;
+  $('youNameBtn').hidden = !(me && me.guest);
   const { list } = boardData('classic');
   const idx = me ? list.findIndex(x => x.playerId === me.id) : -1;
   const best = Math.max(localBest(), myBest(rounds, hard));
@@ -841,19 +882,22 @@ function renderDaily() {
   $('dailyTitle').textContent = `Daily #${dayNumber(todayKey)}`;
   $('dailyDate').textContent = keyToDate(todayKey).toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' });
   const hist = dailyHistory();
-  const streak = dayStreak(hist);
+  const st = streakNow(hist), streak = st.streak;
   $('dayStreak').hidden = streak < 1;
   $('dayStreak').classList.toggle('hot', streak >= 3);
   $('dayStreakN').textContent = streak;
+  $('dayFreeze').hidden = !st.freezes;
+  $('dayFreezeN').textContent = st.freezes;
   const monday = addDays(todayKey, -((keyToDate(todayKey).getDay() + 6) % 7));
   $('dailyWeek').replaceChildren(...Array.from({ length: 7 }, (_, i) => addDays(monday, i)).map(k2 => {
     const d = document.createElement('div');
-    const played = hist[k2] != null;
-    d.className = [played ? 'done' : '', k2 === todayKey ? 'today' : '', k2 > todayKey ? 'future' : ''].join(' ').trim();
+    const played = hist[k2] != null, frozen = st.usedOn.includes(k2);
+    d.className = [played ? 'done' : '', frozen ? 'frozen' : '', k2 === todayKey ? 'today' : '', k2 > todayKey ? 'future' : ''].join(' ').trim();
     const dot = document.createElement('i');
     if (played) dot.innerHTML = '<svg viewBox="0 0 24 24"><path d="m5 12 5 5 9-10"/></svg>';
+    else if (frozen) { dot.innerHTML = '<svg viewBox="0 0 24 24"><path d="M12 3v18M5 7.5l14 9M19 7.5l-14 9"/></svg>'; d.title = 'Covered by a streak freeze'; }
     const lab = document.createElement('span'); lab.textContent = keyToDate(k2).toLocaleDateString(undefined, { weekday: 'narrow' });
-    d.title = keyToDate(k2).toLocaleDateString(undefined, { weekday: 'long' }) + (played ? `: ${hist[k2].toLocaleString()}` : '');
+    if (!frozen) d.title = keyToDate(k2).toLocaleDateString(undefined, { weekday: 'long' }) + (played ? `: ${hist[k2].toLocaleString()}` : '');
     d.append(dot, lab);
     return d;
   }));
@@ -869,6 +913,7 @@ function renderDaily() {
     $('dailyRank').textContent = idx >= 0 ? `#${idx + 1} of ${list.length}` : '–';
     $('dailyNext').textContent = untilMidnight();
   }
+  $('dailyRemindBtn').hidden = mine == null || !remindersPossible() || store.get('reminders', false);
 }
 const Replay = prog => (prog.events || []).filter(e => e.o === 'a').length;
 setInterval(() => { if (!$('home').hidden) renderDaily(); }, 30000);
@@ -947,13 +992,26 @@ const svgEl = (tag, attrs, text) => { const e = document.createElementNS(SVGNS, 
 const statGames = () => gameHistory.filter((x, i, a) => !(x.mode === 'challenge' && a.some(y => y !== x && y.mode === 'classic' && y.score === x.score && Math.abs(y.at - x.at) < 2000)));
 
 function renderStats() {
-  $('pName').textContent = me ? me.nickname : 'Not set';
-  $('renameBtn').textContent = me ? 'Change' : 'Pick one';
+  $('pName').textContent = me ? me.nickname + (me.guest ? ' (guest)' : '') : 'Not set';
+  $('renameBtn').textContent = me && !me.guest ? 'Change' : 'Pick one';
+  const lv = levelInfo(totalScore());
+  $('stLevelSub').textContent = `${lv.level} · ${lv.title}`;
+  $('stLevelFill').style.width = `${Math.round(lv.progress * 100)}%`;
+  $('stLevelNext').textContent = `${(lv.need - lv.into).toLocaleString()} XP to level ${lv.level + 1}. Every 10 points you score is 1 XP.`;
+  const bs = badgeState(statGames(), todayKey);
+  $('stBadgeCount').textContent = `${bs.filter(b => b.earned).length} of ${bs.length}`;
+  $('stBadges').replaceChildren(...bs.map(b => {
+    const d = document.createElement('div'); d.className = 'badge-item' + (b.earned ? '' : ' locked');
+    const m = document.createElement('div'); m.className = 'medal'; m.textContent = b.earned ? '★' : '?';
+    const n = document.createElement('b'); n.textContent = b.name;
+    const t = document.createElement('span'); t.textContent = b.desc;
+    d.append(m, n, t); return d;
+  }));
   $('copyStep').hidden = !getToken();   // nothing to copy until there's a player
   const games = statGames();
   const has = games.length > 0;
   $('stEmpty').hidden = has;
-  for (const id of ['stTiles', 'stTrendPanel', 'stSwitchPanel', 'stSplitPanel']) $(id).hidden = !has;
+  for (const id of ['stTiles', 'stTrendPanel', 'stSwitchPanel', 'stSplitPanel', 'stLevelPanel']) $(id).hidden = !has;
   if (!has) return;
   const totalQ = games.reduce((a, x) => a + x.rounds, 0), totalC = games.reduce((a, x) => a + x.correct, 0);
   const avgAll = mean(games.filter(x => x.avgMs).map(x => x.avgMs));
@@ -1007,6 +1065,35 @@ function renderStats() {
     return meter(k, total ? right / total : 0, total ? `${Math.round((right / total) * 100)}%` : '–', alt);
   }));
 }
+$('saveName').addEventListener('submit', async e => {
+  e.preventDefault();
+  const check = cleanNickname($('saveNameInput').value);
+  const err = $('saveNameError');
+  if (!check.ok) { err.textContent = check.error; err.hidden = false; return; }
+  $('saveNameBtn').disabled = true;
+  try {
+    const r = await api('rename', { nickname: check.value });
+    me = r.player; store.set('me', me);
+    $('saveName').hidden = true; err.hidden = true;
+    toast(`Saved. You’re on the leaderboard as ${me.nickname}`);
+    await refreshRemote();
+  } catch (ex) { err.textContent = ex.offline ? 'You’re offline. Try again when you’re connected.' : ex.message; err.hidden = false; }
+  finally { $('saveNameBtn').disabled = false; }
+});
+$('youNameBtn').addEventListener('click', () => askNickname(null, { rename: true }));
+$('deleteMeBtn').addEventListener('click', async () => {
+  const b = $('deleteMeBtn');
+  if (!getToken()) { toast('There’s no player on this device.'); return; }
+  if (b.dataset.armed !== '1') { b.dataset.armed = '1'; b.textContent = 'Tap again to delete for good'; setTimeout(() => { b.dataset.armed = ''; b.textContent = 'Delete my player'; }, 5000); return; }
+  b.disabled = true;
+  try {
+    await api('deleteMe');
+    try { Object.keys(localStorage).filter(k => k.startsWith('lor.')).forEach(k => localStorage.removeItem(k)); } catch {}
+    const reg = await navigator.serviceWorker?.ready.catch(() => null);
+    (await reg?.pushManager?.getSubscription())?.unsubscribe();
+    location.href = '/';
+  } catch (e) { toast(e.offline ? 'You’re offline. Try again when you’re connected.' : e.message); b.disabled = false; }
+});
 $('renameBtn').addEventListener('click', () => (getToken() ? askNickname(null, { rename: true }) : askNickname(null)));
 $('copyCodeBtn').addEventListener('click', async () => {
   const t = getToken(); if (!t) return;
@@ -1147,6 +1234,45 @@ $('copyTextBtn').addEventListener('click', async () => {
   try { await navigator.clipboard.writeText(text); toast(shareKind === 'challenge' ? 'Invite copied. Send it to a friend' : 'Text copied'); }
   catch { toast('Couldn’t copy. Select the text in your post instead'); }
 });
+
+// ================= daily reminders (web push) =================
+const remindersPossible = () => 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
+function b64ToBytes(b64) {
+  const pad = '='.repeat((4 - (b64.length % 4)) % 4);
+  const raw = atob((b64 + pad).replace(/-/g, '+').replace(/_/g, '/'));
+  return Uint8Array.from(raw, c => c.charCodeAt(0));
+}
+function renderReminder() { $('remindLabel').textContent = `Daily reminder: ${store.get('reminders', false) ? 'on (6 pm)' : 'off'}`; }
+async function enableReminders() {
+  if (!remindersPossible()) {
+    toast(isIOS() && !isStandalone() ? 'On iPhone, add the game to your Home Screen first, then turn on reminders.' : 'This browser can’t show reminders.');
+    return;
+  }
+  if (!(await ensurePlayer())) return;
+  const perm = await Notification.requestPermission();
+  if (perm !== 'granted') { toast('Notifications are blocked. You can allow them in your browser’s site settings.'); return; }
+  try {
+    const reg = await navigator.serviceWorker.ready;
+    const { key } = await api('pushKey');
+    const sub = (await reg.pushManager.getSubscription()) || await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64ToBytes(key) });
+    await api('pushSubscribe', { subscription: sub.toJSON(), tzOffsetMin: -new Date().getTimezoneOffset(), hour: 18 });
+    store.set('reminders', true);
+    toast('Done. We’ll remind you at 6 pm on days you haven’t played the Daily.');
+  } catch (e) { toast(e.offline ? 'You’re offline. Try again when you’re connected.' : 'Couldn’t turn on reminders. Try again later.'); report('push: ' + (e.message || e)); }
+  renderReminder(); renderDaily();
+}
+async function disableReminders() {
+  try {
+    const reg = await navigator.serviceWorker.ready;
+    const sub = await reg.pushManager.getSubscription();
+    if (sub) { await api('pushUnsubscribe', { endpoint: sub.endpoint }).catch(() => {}); await sub.unsubscribe(); }
+  } catch {}
+  store.set('reminders', false); renderReminder(); renderDaily();
+  toast('Reminders off.');
+}
+$('remindBtn').addEventListener('click', () => { setMenu(false); store.get('reminders', false) ? disableReminders() : enableReminders(); });
+$('dailyRemindBtn').addEventListener('click', enableReminders);
+renderReminder();
 
 // ================= install (PWA) =================
 let installPrompt = null;

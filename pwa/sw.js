@@ -1,11 +1,12 @@
 // Offline support: the app shell is cached on install, so the game opens and Classic games
 // play with no connection. Game-server calls always go to the network.
-const VERSION = 'v9';
+const VERSION = 'v10';
 const SHELL = `lor-shell-${VERSION}`;
 const FONTS = 'lor-fonts';
 const FILES = [
   '/', '/styles.css', '/manifest.webmanifest',
-  '/src/main.js', '/src/core.js', '/src/api.js', '/src/config.js',
+  '/src/main.js', '/src/core.js', '/src/api.js', '/src/config.js', '/privacy', '/doc.css',
+  '/fonts/fonts.css', '/fonts/inter-latin.woff2', '/fonts/inter-latin-ext.woff2', '/fonts/bricolage-grotesque-latin.woff2', '/fonts/bricolage-grotesque-latin-ext.woff2',
   '/icons/icon-192.png', '/icons/icon-512.png', '/icons/maskable-512.png', '/icons/apple-touch-icon.png', '/icons/icon-32.png', '/icons/icon.svg',
 ];
 
@@ -51,4 +52,24 @@ self.addEventListener('fetch', e => {
     if (res.ok) caches.open(SHELL).then(c => c.put(req, res.clone()));
     return res;
   })));
+});
+
+// Daily reminders: show the notification the server sends, and open the Daily when it's tapped.
+self.addEventListener('push', e => {
+  let d = {};
+  try { d = e.data ? e.data.json() : {}; } catch {}
+  e.waitUntil(self.registration.showNotification(d.title || 'Today’s Daily is ready', {
+    body: d.body || 'Same 20 questions for everyone. One try.',
+    icon: '/icons/icon-192.png', badge: '/icons/icon-192.png', tag: 'daily',
+    data: { url: d.url || '/?go=daily' },
+  }));
+});
+self.addEventListener('notificationclick', e => {
+  e.notification.close();
+  const url = e.notification.data?.url || '/';
+  e.waitUntil(self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(list => {
+    const open = list.find(c => new URL(c.url).origin === location.origin);
+    if (open) { open.navigate(url); return open.focus(); }
+    return self.clients.openWindow(url);
+  }));
 });

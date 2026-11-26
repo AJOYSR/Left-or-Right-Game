@@ -2,9 +2,10 @@
 // The server picks seeds, times games and re-scores every finished game from its events,
 // so a score posted by editing the app's code, or by a script, is rejected.
 import { createClient } from 'npm:@supabase/supabase-js@2.45.4';
+import webpush from 'npm:web-push@3.6.7';
 import {
   Run, ROUND_OPTIONS, DAILY_ROUNDS, MAX_PER_ROUND, MIN_MS, newSeed, challengeCode, parseCode,
-  minimumDurationMs, timingCheck, cleanNickname,
+  minimumDurationMs, timingCheck, cleanNickname, streakInfo, dayNumber, addDays,
 } from './core.js';
 
 const db = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!, {
@@ -18,6 +19,7 @@ const LIMITS = {
   startsPer10Min: 40,                           // a real game takes 30 s or more
   renameEveryMs: 10 * 60 * 1000,
   classicMaxAgeMs: 6 * 60 * 60 * 1000,          // a Classic game must be submitted within 6 hours
+  errorsPerIpHour: 30,                          // error reports from one network
 };
 const ALLOWED_ORIGINS = [
   'https://left-or-right-peach.vercel.app',
@@ -34,7 +36,7 @@ function cors(req: Request) {
   return {
     'Access-Control-Allow-Origin': allow,
     'Vary': 'Origin',
-    'Access-Control-Allow-Headers': 'authorization, apikey, content-type, x-player-token',
+    'Access-Control-Allow-Headers': 'authorization, apikey, content-type, x-player-token, x-admin-key',
     'Access-Control-Allow-Methods': 'POST, OPTIONS',
     'Access-Control-Max-Age': '86400',
   };
@@ -83,9 +85,28 @@ const gameId = (v: unknown) => { if (typeof v !== 'string' || !UUID.test(v)) fai
 async function player(req: Request) {
   const token = req.headers.get('x-player-token') || '';
   if (!/^[0-9a-f]{64}$/.test(token)) fail(401, 'Not signed in.');
-  const { data } = await db.from('players').select('id, nickname, renamed_at').eq('token_hash', await sha256(token)).maybeSingle();
+  const { data } = await db.from('players').select('id, nickname, renamed_at, is_guest, banned').eq('token_hash', await sha256(token)).maybeSingle();
   if (!data) fail(401, 'Not signed in.');
+  if (data!.banned) fail(403, 'This player was removed for breaking the rules.');
   return data!;
+}
+
+// The admin page sends its key in a header; compare in constant time.
+async function admin(req: Request) {
+  const given = req.headers.get('x-admin-key') || '', real = await secret('admin_key');
+  let diff = given.length ^ real.length;
+  for (let i = 0; i < Math.max(given.length, real.length); i++) diff |= (given.charCodeAt(i) || 0) ^ (real.charCodeAt(i) || 0);
+  if (diff !== 0 || !real) { await new Promise(r => setTimeout(r, 400)); fail(403, 'Wrong admin key.'); }
+}
+
+// Keys for signing reminder notifications, made once and kept server-side.
+async function vapid() {
+  if (!(await secret('vapid_public'))) {
+    const k = webpush.generateVAPIDKeys();
+    await db.from('app_secrets').upsert([{ key: 'vapid_public', value: k.publicKey }, { key: 'vapid_private', value: k.privateKey }], { onConflict: 'key', ignoreDuplicates: true });
+    secrets = null;   // re-read, in case another request made them first
+  }
+  return { pub: await secret('vapid_public'), priv: await secret('vapid_private') };
 }
 
 const rowOut = (r: any) => ({ playerId: r.player_id, nickname: r.nickname, score: r.score, correct: r.correct, avgMs: r.avg_ms });
@@ -105,7 +126,9 @@ async function startsRecently(playerId: string) {
 // ---------- actions ----------
 const actions: Record<string, (req: Request, body: any) => Promise<unknown>> = {
   async register(req, b) {
-    const nickname = nick(b.nickname);
+    // Guests play first and pick a name later; they get a placeholder like "Guest 4821".
+    const guest = b.guest === true;
+    let nickname = guest ? '' : nick(b.nickname);
     const ip = await ipHash(req);
     const [{ count: hour }, { count: day }] = await Promise.all([
       db.from('players').select('id', { count: 'exact', head: true }).eq('ip_hash', ip).gte('created_at', since(36e5)),
@@ -113,22 +136,34 @@ const actions: Record<string, (req: Request, body: any) => Promise<unknown>> = {
     ]);
     if ((hour || 0) >= LIMITS.registerPerIpHour || (day || 0) >= LIMITS.registerPerIpDay) fail(429, 'Too many new players from this network. Try again later.');
     const token = hex(crypto.getRandomValues(new Uint8Array(32)).buffer);
-    const { data, error } = await db.from('players').insert({ nickname, token_hash: await sha256(token), ip_hash: ip }).select('id, nickname').single();
-    if (isUnique(error)) fail(409, 'That nickname is taken. Try another.');
-    if (error) fail(500, 'Could not create your player.');
-    return { token, player: data };
+    for (let attempt = 0; attempt < 5; attempt++) {
+      if (guest) nickname = 'Guest ' + String(1000 + Math.floor(cryptoRand() * 9000));
+      const { data, error } = await db.from('players').insert({ nickname, token_hash: await sha256(token), ip_hash: ip, is_guest: guest }).select('id, nickname, is_guest').single();
+      if (!error) return { token, player: { id: data!.id, nickname: data!.nickname, guest: data!.is_guest } };
+      if (!isUnique(error)) fail(500, 'Could not create your player.');
+      if (!guest) fail(409, 'That nickname is taken. Try another.');
+    }
+    return fail(500, 'Could not create your player.');
   },
 
-  async me(req) { const p = await player(req); return { player: { id: p.id, nickname: p.nickname } }; },
+  async me(req) { const p = await player(req); return { player: { id: p.id, nickname: p.nickname, guest: p.is_guest } }; },
 
   async rename(req, b) {
     const me = await player(req);
     const nickname = nick(b.nickname);
     if (me.renamed_at && Date.now() - new Date(me.renamed_at).getTime() < LIMITS.renameEveryMs) fail(429, 'You can change your nickname again in a few minutes.');
-    const { error } = await db.from('players').update({ nickname, renamed_at: new Date().toISOString() }).eq('id', me.id);
+    const { error } = await db.from('players').update({ nickname, renamed_at: new Date().toISOString(), is_guest: false }).eq('id', me.id);
     if (isUnique(error)) fail(409, 'That nickname is taken. Try another.');
     if (error) fail(500, 'Could not change your nickname.');
-    return { player: { id: me.id, nickname } };
+    return { player: { id: me.id, nickname, guest: false } };
+  },
+
+  // Deletes the player and everything tied to them (games, reminders); error reports keep no link.
+  async deleteMe(req) {
+    const me = await player(req);
+    const { error } = await db.from('players').delete().eq('id', me.id);
+    if (error) fail(500, 'Could not delete your player. Try again.');
+    return { ok: true };
   },
 
   async start(req, b) {
@@ -268,6 +303,115 @@ const actions: Record<string, (req: Request, body: any) => Promise<unknown>> = {
       day ? board('daily', { day }) : Promise.resolve([]),
     ]);
     return { all, week, daily };
+  },
+
+  // ---------- error reports from browsers ----------
+  async logError(req, b) {
+    const ip = await ipHash(req);
+    const { count } = await db.from('client_errors').select('id', { count: 'exact', head: true }).eq('ip_hash', ip).gte('at', since(36e5));
+    if ((count || 0) >= LIMITS.errorsPerIpHour) return { ok: true };   // quietly drop floods
+    let playerId = null;
+    try { playerId = (await player(req)).id; } catch {}
+    const str = (v: unknown, n: number) => (typeof v === 'string' ? v.slice(0, n) : null);
+    const message = str(b.message, 500);
+    if (!message) fail(400, 'Bad request.');
+    await db.from('client_errors').insert({ player_id: playerId, message, stack: str(b.stack, 2000), url: str(b.url, 300), ua: str(req.headers.get('user-agent'), 300), ip_hash: ip });
+    return { ok: true };
+  },
+
+  // ---------- daily reminder notifications ----------
+  async pushKey() { return { key: (await vapid()).pub }; },
+
+  async pushSubscribe(req, b) {
+    const me = await player(req);
+    const sub = b.subscription || {};
+    const endpoint = String(sub.endpoint || ''), p256dh = String(sub.keys?.p256dh || ''), auth = String(sub.keys?.auth || '');
+    if (!/^https:\/\//.test(endpoint) || endpoint.length > 1000 || !p256dh || p256dh.length > 200 || !auth || auth.length > 100) fail(400, 'Bad subscription.');
+    const tz = Math.max(-840, Math.min(840, Math.round(Number(b.tzOffsetMin) || 0)));
+    const hour = Number.isInteger(b.hour) && b.hour >= 0 && b.hour <= 23 ? b.hour : 18;
+    const { count } = await db.from('push_subscriptions').select('id', { count: 'exact', head: true }).eq('player_id', me.id);
+    if ((count || 0) >= 5) await db.from('push_subscriptions').delete().eq('player_id', me.id);   // keep the newest devices only
+    const { error } = await db.from('push_subscriptions').upsert({ player_id: me.id, endpoint, p256dh, auth, tz_offset_min: tz, remind_hour: hour }, { onConflict: 'endpoint' });
+    if (error) fail(500, 'Could not turn on reminders.');
+    return { ok: true, hour };
+  },
+
+  async pushUnsubscribe(req, b) {
+    const me = await player(req);
+    await db.from('push_subscriptions').delete().eq('player_id', me.id).eq('endpoint', String(b.endpoint || ''));
+    return { ok: true };
+  },
+
+  // Called every hour by the database scheduler. Reminds players whose local reminder hour it is
+  // and who haven't played today's Daily yet.
+  async sendReminders(req) {
+    if (req.headers.get('x-cron-key') !== (await secret('cron_key'))) fail(403, 'Forbidden.');
+    const keys = await vapid();
+    webpush.setVapidDetails('https://left-or-right-peach.vercel.app', keys.pub, keys.priv);
+    const { data: subs } = await db.from('push_subscriptions').select('*').limit(5000);
+    let sent = 0, removed = 0, skipped = 0;
+    for (const s of subs || []) {
+      const local = new Date(Date.now() + s.tz_offset_min * 60000);
+      const day = local.toISOString().slice(0, 10);
+      if (local.getUTCHours() !== s.remind_hour || s.last_sent_day === day) { skipped++; continue; }
+      const { data: played } = await db.from('games').select('day').eq('player_id', s.player_id).eq('mode', 'daily').eq('status', 'finished').gte('day', addDays(day, -90));
+      const days = (played || []).map(g => g.day);
+      await db.from('push_subscriptions').update({ last_sent_day: day }).eq('id', s.id);
+      if (days.includes(day)) { skipped++; continue; }
+      const st = streakInfo(days, day);
+      const body = st.alive && st.streak > 0 ? `Keep your ${st.streak}-day streak going. Same 20 questions for everyone.` : 'Same 20 questions for everyone. One try.';
+      try {
+        await webpush.sendNotification({ endpoint: s.endpoint, keys: { p256dh: s.p256dh, auth: s.auth } },
+          JSON.stringify({ title: `Daily #${dayNumber(day)} is ready`, body, url: '/?go=daily' }), { TTL: 6 * 3600 });
+        sent++;
+      } catch (e) {
+        const code = (e as any)?.statusCode;
+        if (code === 404 || code === 410) { await db.from('push_subscriptions').delete().eq('id', s.id); removed++; }
+        else console.error('push failed', code);
+      }
+    }
+    return { sent, removed, skipped };
+  },
+
+  // ---------- admin page ----------
+  async adminSummary(req) {
+    await admin(req);
+    const head = (q: any) => q.then((r: any) => r.count || 0);
+    const [players, guests, banned, gamesToday, errors24h, reminders] = await Promise.all([
+      head(db.from('players').select('id', { count: 'exact', head: true })),
+      head(db.from('players').select('id', { count: 'exact', head: true }).eq('is_guest', true)),
+      head(db.from('players').select('id', { count: 'exact', head: true }).eq('banned', true)),
+      head(db.from('games').select('id', { count: 'exact', head: true }).eq('status', 'finished').gte('finished_at', since(864e5))),
+      head(db.from('client_errors').select('id', { count: 'exact', head: true }).gte('at', since(864e5))),
+      head(db.from('push_subscriptions').select('id', { count: 'exact', head: true })),
+    ]);
+    return { players, guests, banned, gamesToday, errors24h, reminders };
+  },
+  async adminPlayers(req, b) {
+    await admin(req);
+    let q = db.from('players').select('id, nickname, is_guest, banned, created_at, games(count)').order('created_at', { ascending: false }).limit(100);
+    if (typeof b.q === 'string' && b.q.trim()) q = q.ilike('nickname', `%${b.q.trim().replace(/[%_\\]/g, m => '\\' + m).slice(0, 30)}%`);
+    const { data, error } = await q;
+    if (error) fail(500, 'Could not load players.');
+    return { players: (data || []).map((p: any) => ({ id: p.id, nickname: p.nickname, guest: p.is_guest, banned: p.banned, createdAt: p.created_at, games: p.games?.[0]?.count ?? 0 })) };
+  },
+  async adminSetBanned(req, b) {
+    await admin(req);
+    const { error } = await db.from('players').update({ banned: b.banned === true }).eq('id', gameId(b.playerId));
+    if (error) fail(500, 'Could not update the player.');
+    return { ok: true };
+  },
+  async adminRename(req, b) {
+    await admin(req);
+    const { error } = await db.from('players').update({ nickname: nick(b.nickname) }).eq('id', gameId(b.playerId));
+    if (isUnique(error)) fail(409, 'That nickname is taken.');
+    if (error) fail(500, 'Could not rename the player.');
+    return { ok: true };
+  },
+  async adminErrors(req) {
+    await admin(req);
+    const { data } = await db.from('client_errors').select('at, message, stack, url, ua, player_id').order('at', { ascending: false }).limit(100);
+    return { errors: data || [] };
   },
 
   async myStats(req) {

@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>Admin · Left or Right</title>
+<link rel="icon" href="/icons/icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/fonts/fonts.css">
+<link rel="stylesheet" href="/styles.css">
+<link rel="stylesheet" href="/doc.css">
+<script type="module" src="/src/admin.js"></script>
+</head>
+<body>
+<main class="doc">
+  <a class="back" href="/">← Back to the game</a>
+  <h1>Admin</h1>
+
+  <form id="keyForm" class="panel" novalidate>
+    <label class="field-label" for="keyInput">Admin key</label>
+    <div class="code-row">
+      <input id="keyInput" class="field" type="password" autocomplete="off" spellcheck="false" placeholder="Paste the admin key">
+      <button class="cta small-cta" type="submit">Open</button>
+    </div>
+    <p class="field-error" id="keyError" hidden></p>
+    <p class="muted">The key is in Supabase: Table editor → <b>app_secrets</b> → <b>admin_key</b>. It’s kept only for this browser tab.</p>
+  </form>
+
+  <section id="panel" hidden>
+    <div class="adm-tiles" id="tiles"></div>
+
+    <h2>Players</h2>
+    <form class="adm-row" id="searchForm" novalidate>
+      <input id="searchInput" class="field" placeholder="Search nicknames" aria-label="Search nicknames" style="max-width:280px">
+      <button class="ghost small" type="submit">Search</button>
+      <span class="muted" id="playerCount"></span>
+    </form>
+    <table class="adm-table">
+      <thead><tr><th>Nickname</th><th>Games</th><th>Joined</th><th></th></tr></thead>
+      <tbody id="players"></tbody>
+    </table>
+
+    <h2>Recent errors <span class="muted" id="errCount"></span></h2>
+    <table>
+      <thead><tr><th>When</th><th>What</th></tr></thead>
+      <tbody id="errors"></tbody>
+    </table>
+    <p><button class="ghost small" id="signOut" type="button">Forget the key in this tab</button></p>
+  </section>
+</main>
+</body>
+</html>

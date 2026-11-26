@@ -67,3 +67,16 @@ Shared links show a picture on LinkedIn, X, WhatsApp, Slack and others:
 - The home page uses the general game preview (`/api/og`).
 Social apps cache previews; to refresh one on LinkedIn, paste the link into
 https://www.linkedin.com/post-inspector/.
+
+## Players, progress and moderation
+
+- **Play first:** new visitors get a guest player automatically ("Guest 4821") and a 4-step practice.
+  After their first posted game, the results screen offers to save a nickname.
+- **Streak freezes:** every 7 Dailies in a row earn a freeze (hold up to 2); a freeze covers one missed day.
+- **Levels and badges:** every 10 points scored is 1 XP; 11 badges. Rules are in `src/core.js` (tested).
+- **Daily reminders:** web push at 6 pm local time on days the Daily hasn't been played. The database
+  calls the server every hour (`lor-reminders` cron job); keys for signing are made and kept server-side.
+- **Error reports:** browsers send uncaught errors (max 5 per visit, rate-limited) to `client_errors`.
+- **Admin page:** `/admin`, unlocked with `app_secrets.admin_key`: totals, remove/restore/rename players, recent errors.
+- **Privacy:** `/privacy`. Players can delete themselves (Stats → Delete my player). Fonts are self-hosted.
+- **Visitor counts:** Vercel Web Analytics (cookie-free). Enable it in the Vercel dashboard.

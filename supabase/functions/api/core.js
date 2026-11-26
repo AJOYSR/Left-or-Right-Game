@@ -202,7 +202,90 @@ export function cleanNickname(raw) {
   if (s.length < 2 || s.length > 20) return { ok: false, error: 'Use 2 to 20 characters.' };
   if (!/^[\p{L}\p{N}][\p{L}\p{N} ._'-]*$/u.test(s)) return { ok: false, error: 'Use letters, numbers, spaces and . _ - \' only.' };
   if (RESERVED.includes(s.toLowerCase())) return { ok: false, error: 'That nickname is reserved. Pick another.' };
+  if (isOffensive(s)) return { ok: false, error: 'Please pick a different nickname.' };
   return { ok: true, value: s };
+}
+
+// A small list of words nobody needs in a nickname. Long words are matched anywhere (so spacing,
+// symbols and l33t spelling don't get round it); short ones only as whole words, so names like
+// "Cassidy" or "Scunthorpe" aren't caught by accident.
+const BLOCK_ANYWHERE = ['fuck', 'shit', 'bitch', 'cunt', 'nigger', 'nigga', 'faggot', 'retard', 'whore', 'slut',
+  'rapist', 'pussy', 'penis', 'vagina', 'dildo', 'porn', 'nazi', 'hitler', 'bastard', 'motherf', 'asshole', 'wanker', 'twat',
+  'chink', 'spastic', 'tranny', 'kike', 'paki', 'coon'];
+const BLOCK_WORD = ['ass', 'cum', 'fag', 'sex', 'kkk', 'rape', 'dick', 'cock', 'tit', 'tits', 'piss', 'wtf', 'stfu', 'gay'];
+const LEET = { 0: 'o', 1: 'i', 3: 'e', 4: 'a', 5: 's', 7: 't', 8: 'b', '@': 'a', $: 's', '!': 'i', '|': 'l' };
+export function isOffensive(name) {
+  const lower = String(name).toLowerCase();
+  const collapse = t => t.replace(/(.)\1+/g, '$1');   // "fuuuck" and "fuck" look the same after this
+  const squashed = collapse([...lower].map(ch => LEET[ch] ?? ch).join('').replace(/[^a-z]/g, '')
+    .replace(/scunthorpe|penistone|cockburn|shitake|matsushita|hancock|assassin|grape|therapist/g, ''));   // real words that contain blocked ones
+  if (BLOCK_ANYWHERE.some(w => squashed.includes(collapse(w)))) return true;
+  const words = [...lower].map(ch => LEET[ch] ?? ch).join('').split(/[^a-z]+/).filter(Boolean);
+  return words.some(w => BLOCK_WORD.includes(w));
+}
+
+// ---------- streaks, with freezes ----------
+// Every 7 Dailies in a row earn a streak freeze (you can hold 2). A freeze covers one missed day
+// automatically, so one busy day doesn't wipe out a long streak.
+export const FREEZE_EVERY = 7, MAX_FREEZES = 2;
+export function streakInfo(playedDays, today) {
+  const days = [...new Set(playedDays)].filter(d => d <= today).sort();
+  let streak = 0, freezes = 0, earned = 0, prev = null, usedOn = [];
+  for (const d of days) {
+    if (prev) {
+      let gap = Math.round((Date.parse(d) - Date.parse(prev)) / 864e5) - 1;   // missed days in between
+      const covered = gap > 0 && gap <= freezes;
+      if (gap > 0 && !covered) { streak = 0; earned = 0; freezes = 0; usedOn = []; }
+      else if (covered) { freezes -= gap; for (let i = 1; i <= gap; i++) usedOn.push(addDays(prev, i)); }
+    }
+    streak++; earned++;
+    if (earned % FREEZE_EVERY === 0 && freezes < MAX_FREEZES) freezes++;
+    prev = d;
+  }
+  // a streak is still alive today if the last Daily was today or yesterday (or the gap fits the freezes left)
+  if (prev && prev < today) {
+    const missed = Math.round((Date.parse(today) - Date.parse(prev)) / 864e5) - 1;
+    if (missed > freezes) return { streak: 0, freezes: 0, usedOn: [], alive: false };
+  }
+  return { streak, freezes, usedOn, alive: streak > 0 };
+}
+
+// ---------- levels & badges ----------
+export function levelInfo(totalScore) {
+  let xp = Math.floor(totalScore / 10), level = 1, need = 300;
+  while (xp >= need) { xp -= need; level++; need = Math.round(need * 1.15); }
+  const title = level >= 20 ? 'Lightning' : level >= 15 ? 'Swift' : level >= 10 ? 'Sharp' : level >= 5 ? 'Quick' : 'Rookie';
+  return { level, title, into: xp, need, progress: xp / need };
+}
+
+export const BADGES = [
+  { id: 'first', name: 'First game', desc: 'Finish a game', test: s => s.games >= 1 },
+  { id: 'ten', name: 'Regular', desc: 'Finish 10 games', test: s => s.games >= 10 },
+  { id: 'fifty', name: 'Dedicated', desc: 'Finish 50 games', test: s => s.games >= 50 },
+  { id: 'perfect', name: 'Perfect round', desc: 'Get every answer right', test: s => s.perfect >= 1 },
+  { id: 'hardperfect', name: 'Hard and flawless', desc: 'A perfect game on Hard', test: s => s.hardPerfect >= 1 },
+  { id: 'speed', name: 'Quick thinker', desc: 'Average under 0.5 s in a full game', test: s => s.fastest !== null && s.fastest < 500 },
+  { id: 'marathon', name: 'Marathon', desc: 'Finish a 50-round game', test: s => s.marathon >= 1 },
+  { id: 'streak3', name: 'On a roll', desc: 'A 3-day Daily streak', test: s => s.bestStreak >= 3 },
+  { id: 'streak7', name: 'Week strong', desc: 'A 7-day Daily streak', test: s => s.bestStreak >= 7 },
+  { id: 'streak30', name: 'Unstoppable', desc: 'A 30-day Daily streak', test: s => s.bestStreak >= 30 },
+  { id: 'challenger', name: 'Challenger', desc: 'Play a friend’s challenge', test: s => s.challenges >= 1 },
+];
+export function badgeState(games, today) {
+  const full = games.filter(g => g.correct != null);
+  const dailyDays = full.filter(g => g.mode === 'daily' && g.day).map(g => g.day).sort();
+  let best = 0;
+  for (let i = 0; i < dailyDays.length; i++) best = Math.max(best, streakInfo(dailyDays.slice(0, i + 1), dailyDays[i]).streak);
+  const s = {
+    games: full.length,
+    perfect: full.filter(g => g.correct === g.rounds).length,
+    hardPerfect: full.filter(g => g.hard && g.correct === g.rounds).length,
+    fastest: full.filter(g => g.avgMs && g.correct >= Math.min(15, g.rounds)).reduce((m, g) => (m === null || g.avgMs < m ? g.avgMs : m), null),
+    marathon: full.filter(g => g.rounds === 50 && g.correct != null).length,
+    challenges: full.filter(g => g.mode === 'challenge').length,
+    bestStreak: best,
+  };
+  return BADGES.map(b => ({ id: b.id, name: b.name, desc: b.desc, earned: !!b.test(s) }));
 }
 
 // ---------- dates ----------

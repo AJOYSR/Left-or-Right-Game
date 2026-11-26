@@ -620,3 +620,33 @@ img { max-width: 100%; }
 
 /* the header (and its settings menu) must sit above the content that animates in after it */
 #home > .bar { position: relative; z-index: 30; }
+
+/* ---------- progress, guests, reminders ---------- */
+.freeze { display: inline-flex; align-items: center; gap: 3px; margin-left: 4px; padding-left: 8px; border-left: 1px solid color-mix(in srgb, var(--warn) 35%, transparent); color: #5fb8ff; }
+.freeze svg { width: 14px; height: 14px; stroke: currentColor; fill: none; stroke-width: 2; stroke-linecap: round; }
+.week .frozen i { background: color-mix(in srgb, #5fb8ff 22%, transparent); color: #5fb8ff; }
+.week .frozen i svg { stroke: currentColor; }
+.level-row { display: flex; flex-direction: column; gap: 8px; margin-bottom: 14px; }
+.level-top { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; font-size: 13px; color: var(--muted); }
+.level-top b { font-family: var(--display); font-size: 16px; color: var(--ink); }
+.level-bar { height: 8px; border-radius: 99px; background: var(--surface-2); overflow: hidden; }
+.level-bar.big { height: 12px; margin: 4px 0 10px; }
+.level-bar i { display: block; height: 100%; border-radius: 99px; background: linear-gradient(90deg, var(--left), var(--right)); transition: width .6s var(--ease, ease); }
+.level-next { margin: 0; }
+.xp-line { font-size: 14px; font-weight: 700; color: var(--accent); }
+.badges { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 10px; }
+.badge-item { display: flex; flex-direction: column; gap: 4px; padding: 12px; border-radius: 14px; background: var(--surface-2); min-width: 0; }
+.badge-item .medal { width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center; background: linear-gradient(135deg, var(--left), var(--right)); color: #fff; font-weight: 800; font-size: 15px; }
+.badge-item b { font-size: 14px; }
+.badge-item span { font-size: 12px; color: var(--muted); line-height: 1.35; }
+.badge-item.locked { opacity: .5; }
+.badge-item.locked .medal { background: var(--line); color: var(--muted); }
+.save-name { display: flex; flex-direction: column; gap: 10px; border: 2px solid color-mix(in srgb, var(--accent) 45%, transparent); }
+.save-name h2 { margin: 0; font-family: var(--display); font-size: 20px; }
+.small-cta { width: auto; padding: 10px 20px; font-size: 16px; border-radius: 12px; box-shadow: none; }
+#youNameBtn { font-size: 13px; }
+
+.danger-zone { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--line); display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.danger-zone .muted { font-size: 12px; color: var(--muted); }
+.ghost.danger { color: var(--bad); }
+.hint .link { font-size: inherit; }
