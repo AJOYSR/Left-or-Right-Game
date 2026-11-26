@@ -3,6 +3,15 @@
   "cleanUrls": true,
   "headers": [
     {
+      "source": "/assets/(.*)",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=31536000, immutable"
+        }
+      ]
+    },
+    {
       "source": "/sw.js",
       "headers": [
         {
@@ -86,6 +95,10 @@
     {
       "source": "/c/:code",
       "destination": "/api/share?c=:code"
+    },
+    {
+      "source": "/src/:file",
+      "destination": "/legacy/v11/src/:file"
     }
   ]
 }

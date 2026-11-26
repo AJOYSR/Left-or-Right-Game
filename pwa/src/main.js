@@ -2,8 +2,8 @@ import {
   Run, ROUND_OPTIONS, BASE_LIMIT, MAX_PAUSES, MIN_MS, MAX_PER_ROUND, DAILY_ROUNDS, TYPES, RULES_VERSION, LATE_GRACE_MS,
   sideFor, valueLabel, makeQuestion, newSeed, parseCode, keyToDate, dayNumber, addDays, cleanNickname,
   streakInfo, levelInfo, statsFromGames, badgesFromStats, utcDayKey, msToNextUtcDay,
-} from './core.js?v=11';
-import { api, ApiError, store, getToken, setToken, outbox } from './api.js?v=11';
+} from './core.js';
+import { api, ApiError, store, getToken, setToken, outbox } from './api.js';
 
 const WORDS = ['', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine'];
 const DOTS = { 1: [4], 2: [0, 8], 3: [0, 4, 8], 4: [0, 2, 6, 8], 6: [0, 2, 3, 5, 6, 8], 7: [0, 2, 3, 4, 5, 6, 8], 8: [0, 1, 2, 3, 5, 6, 7, 8], 9: [0, 1, 2, 3, 4, 5, 6, 7, 8] };
@@ -233,6 +233,8 @@ $('nickOffline').addEventListener('click', () => { closeDialog($('nickScrim')); 
 
 // Play first: new players get a guest account without being asked anything, and pick a
 // nickname after their first game. Calls fn() once there is a player (or with {offline:true}).
+// The server confirmed this device's player code is no longer valid (not a gateway hiccup).
+const authGone = e => e && e.status === 401 && e.code === 'auth';
 let registering = null;
 function ensurePlayer({ quiet = false } = {}) {
   if (getToken()) return Promise.resolve(true);
@@ -338,7 +340,7 @@ async function startGame(opts = {}) {
       info = await api('start', mode === 'classic' ? { ...base, mode, rounds, hard } : mode === 'daily' ? { ...base, mode, day: todayKey } : { ...base, mode, code: opts.code });
     }
   } catch (e) {
-    if (e.status === 401) { setToken(null); me = null; store.set('me', null); setStarting(false); return startGame(opts); }
+    if (authGone(e)) { setToken(null); me = null; store.set('me', null); setStarting(false); return startGame(opts); }
     if (e.status === 426) { toast(e.message, 6000); setTimeout(() => location.reload(), 2500); return false; }
     if (mode !== 'classic' || !e.offline) {
       toast(e.offline ? 'You’re offline. This needs a connection.' : e.message, 4000);
@@ -1034,7 +1036,7 @@ async function refreshRemote() {
     gameHistory = [...r.games, ...local].sort((a, b) => a.at - b.at);
     store.set('history', gameHistory);
     if (r.lifetime) { serverLifetime = r.lifetime; store.set('lifetime', serverLifetime); }
-  }).catch(e => { if (e.status === 401) { setToken(null); me = null; store.set('me', null); } }));
+  }).catch(e => { if (authGone(e)) { setToken(null); me = null; store.set('me', null); } }));
   if (pendingChallenge) jobs.push(loadChallenge(pendingChallenge.code));
   if (lastRun?.mode === 'challenge') jobs.push(loadChallenge(lastRun.code));
   await Promise.all(jobs);
@@ -1400,9 +1402,10 @@ $('saveName').addEventListener('submit', async e => {
 $('youNameBtn').addEventListener('click', () => askNickname(null, { rename: true }));
 // Switching to another player: forget everything that belonged to the previous one on this
 // device (history, bests, streak, queued games, cached boards). Settings stay.
+// Unsent games stay, in each profile's own outbox: switching back to that code posts them.
 const KEEP_KEYS = ['theme', 'sound', 'size', 'tutorialDone', 'hardIntroDone', 'rounds', 'hard', 'playerToken'];
 function wipePlayerData() {
-  try { Object.keys(localStorage).filter(k => k.startsWith('lor.') && !KEEP_KEYS.includes(k.slice(4))).forEach(k => localStorage.removeItem(k)); } catch {}
+  try { Object.keys(localStorage).filter(k => k.startsWith('lor.') && !KEEP_KEYS.includes(k.slice(4)) && !k.startsWith('lor.outbox.')).forEach(k => localStorage.removeItem(k)); } catch {}
   gameHistory = []; serverLifetime = null; boards = {}; localPlays = 0; lastRun = null;
 }
 $('deleteMeBtn').addEventListener('click', async () => {
@@ -1412,7 +1415,9 @@ $('deleteMeBtn').addEventListener('click', async () => {
   b.disabled = true;
   try {
     await api('deleteMe');
-    try { Object.keys(localStorage).filter(k => k.startsWith('lor.')).forEach(k => localStorage.removeItem(k)); } catch {}
+    // other profiles' unsent games on this device are kept; only this player's go
+    const mineBox = 'lor.outbox.' + (me?.id || '');
+    try { Object.keys(localStorage).filter(k => k.startsWith('lor.') && (!k.startsWith('lor.outbox.') || k === mineBox)).forEach(k => localStorage.removeItem(k)); } catch {}
     const reg = await navigator.serviceWorker?.ready.catch(() => null);
     (await reg?.pushManager?.getSubscription())?.unsubscribe();
     location.href = '/';
@@ -1434,7 +1439,10 @@ $('useCodeBtn').addEventListener('click', async () => {
     const r = await api('me');
     if (!oldMe || oldMe.id !== r.player.id) wipePlayerData();
     me = r.player; store.set('me', me); $('codeInput').value = '';
-    toast(`Signed in as ${me.nickname}`); await refreshRemote();
+    const waiting = outbox.pending().length;
+    toast(`Signed in as ${me.nickname}` + (waiting ? `. Posting ${waiting} saved game${waiting > 1 ? 's' : ''}…` : ''));
+    if (waiting) await flushOutbox({ force: true });   // this profile's saved games go now, not after the retry wait
+    await refreshRemote();
   }
   catch (e) { setToken(old); toast(e.status === 401 ? 'That code didn’t match a player.' : e.message); }
 });
@@ -1694,7 +1702,7 @@ async function boot() {
   if (qs.toString()) history.replaceState(null, '', location.pathname + location.hash);
   if (getToken() && online) {
     try { const r = await api('me'); me = r.player; store.set('me', me); renderAll(); }
-    catch (e) { if (e.status === 401) { setToken(null); me = null; store.set('me', null); } }
+    catch (e) { if (authGone(e)) { setToken(null); me = null; store.set('me', null); } }
   }
   if (online && outbox.pending().length) flushOutbox({ force: true }).then(renderAll);
 }

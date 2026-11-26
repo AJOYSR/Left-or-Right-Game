@@ -1,0 +1,30 @@
+[
+ {
+  "release": "c030602875",
+  "at": "2026-11-26T13:33:44.661Z",
+  "files": {
+   "config.js": "config.6c2d557f76.js",
+   "core.js": "core.373fb97d34.js",
+   "queue.js": "queue.91786d6ba2.js",
+   "api.js": "api.85c113d010.js",
+   "main.js": "main.e39bb03550.js",
+   "admin.js": "admin.48843940de.js",
+   "styles.css": "styles.dd203d50a7.css",
+   "doc.css": "doc.2be06cfe06.css"
+  }
+ },
+ {
+  "release": "0773d75aed",
+  "at": "2026-11-26T13:35:10.424Z",
+  "files": {
+   "config.js": "config.6c2d557f76.js",
+   "core.js": "core.373fb97d34.js",
+   "queue.js": "queue.91786d6ba2.js",
+   "api.js": "api.85c113d010.js",
+   "main.js": "main.7becfceace.js",
+   "admin.js": "admin.48843940de.js",
+   "styles.css": "styles.dd203d50a7.css",
+   "doc.css": "doc.2be06cfe06.css"
+  }
+ }
+]

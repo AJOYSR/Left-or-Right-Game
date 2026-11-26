@@ -1,7 +1,7 @@
 // Admin page: overview, remove or rename players, read error reports.
 // Every action is checked by the server against the admin key; this page holds no secrets itself.
-import { API_URL, PUBLISHABLE_KEY } from './config.js?v=11';
-import { cleanNickname } from './core.js?v=11';
+import { API_URL, PUBLISHABLE_KEY } from './config.js';
+import { cleanNickname } from './core.js';
 
 const $ = id => document.getElementById(id);
 const KEY = 'lor.adminKey';

@@ -42,8 +42,12 @@ function cors(req: Request) {
     'Access-Control-Max-Age': '86400',
   };
 }
-class HttpError extends Error { constructor(public status: number, msg: string) { super(msg); } }
-const fail = (status: number, msg: string): never => { throw new HttpError(status, msg); };
+// Every error this function answers with carries a `code`. The app only gives up on a finished game
+// for a 4xx with a code (a confirmed answer); errors from a gateway or proxy have none and are retried.
+// Database trouble is always a 503, never a 401 or 404, so it can't be mistaken for a real "no".
+class HttpError extends Error { constructor(public status: number, msg: string, public code = 'api') { super(msg); } }
+const fail = (status: number, msg: string, code = 'api'): never => { throw new HttpError(status, msg, code); };
+const busy = (): never => fail(503, 'The game server is busy. Your game is saved; it will post shortly.', 'db');
 
 // ---------- helpers ----------
 const cryptoRand = () => crypto.getRandomValues(new Uint32Array(1))[0] / 4294967296;
@@ -85,10 +89,11 @@ const gameId = (v: unknown) => { if (typeof v !== 'string' || !UUID.test(v)) fai
 
 async function player(req: Request) {
   const token = req.headers.get('x-player-token') || '';
-  if (!/^[0-9a-f]{64}$/.test(token)) fail(401, 'Not signed in.');
-  const { data } = await db.from('players').select('id, nickname, renamed_at, is_guest, banned').eq('token_hash', await sha256(token)).maybeSingle();
-  if (!data) fail(401, 'Not signed in.');
-  if (data!.banned) fail(403, 'This player was removed for breaking the rules.');
+  if (!/^[0-9a-f]{64}$/.test(token)) fail(401, 'Not signed in.', 'auth');
+  const { data, error } = await db.from('players').select('id, nickname, renamed_at, is_guest, banned').eq('token_hash', await sha256(token)).maybeSingle();
+  if (error) busy();
+  if (!data) fail(401, 'Not signed in.', 'auth');
+  if (data!.banned) fail(403, 'This player was removed for breaking the rules.', 'banned');
   return data!;
 }
 
@@ -293,16 +298,17 @@ const actions: Record<string, (req: Request, body: any) => Promise<unknown>> = {
   async finish(req, b) {
     const me = await player(req);
     const id = gameId(b.gameId);
-    const { data: game } = await db.from('games').select('*').eq('id', id).eq('player_id', me.id).maybeSingle();
-    if (!game) fail(404, 'Game not found.');
+    const { data: game, error: lookupError } = await db.from('games').select('*').eq('id', id).eq('player_id', me.id).maybeSingle();
+    if (lookupError) busy();
+    if (!game) fail(404, 'Game not found.', 'missing');
     // Sending the same game again (the answer to the first try was lost) gets the saved result back.
     if (game!.status === 'finished') return { ...resultOf(game), ...(await placement(game)), already: true };
-    if (game!.status === 'rejected') fail(422, 'This game couldn’t be verified, so it wasn’t posted.');
+    if (game!.status === 'rejected') fail(422, 'This game couldn’t be verified, so it wasn’t posted.', 'rejected');
     const events = b.events;
     const reject = async (reason: string) => {
       await db.from('games').update({ status: 'rejected', reject_reason: reason.slice(0, 200), finished_at: new Date().toISOString() }).eq('id', id).eq('status', 'open');
       bump(['srv_reject']);
-      return fail(422, 'This game couldn’t be verified, so it wasn’t posted.');
+      return fail(422, 'This game couldn’t be verified, so it wasn’t posted.', 'rejected');
     };
     let run: any;
     try {
@@ -323,10 +329,11 @@ const actions: Record<string, (req: Request, body: any) => Promise<unknown>> = {
     };
     // only the first submit of a game counts, even if two arrive at once
     const { data: done, error } = await db.from('games').update(update).eq('id', id).eq('status', 'open').select('*');
-    if (error) fail(500, 'Could not save the game. Try again.');
+    if (error) busy();
     if (!done || !done.length) {
       // a second copy of this submit won the race: return what it saved
-      const { data: again } = await db.from('games').select('*').eq('id', id).maybeSingle();
+      const { data: again, error: againError } = await db.from('games').select('*').eq('id', id).maybeSingle();
+      if (againError) busy();
       if (again?.status === 'finished') return { ...resultOf(again), ...(await placement(again)), already: true };
       fail(409, 'This game was already submitted.');
     }
@@ -587,7 +594,7 @@ Deno.serve(async req => {
     if (!fn) return json({ error: 'Unknown action.' }, 400);
     return json(await fn(req, body));
   } catch (e) {
-    if (e instanceof HttpError) return json({ error: e.message }, e.status);
+    if (e instanceof HttpError) return json({ error: e.message, code: e.code }, e.status);
     console.error(e);
     return json({ error: 'Something went wrong. Try again.' }, 500);
   }

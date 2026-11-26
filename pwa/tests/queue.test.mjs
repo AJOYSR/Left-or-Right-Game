@@ -3,11 +3,14 @@ import assert from 'node:assert/strict';
 import { createOutbox, isRetryable, backoff } from '../src/queue.js';
 
 const memStore = () => { const m = new Map(); return { get: (k, d) => (m.has(k) ? JSON.parse(m.get(k)) : d), set: (k, v) => m.set(k, JSON.stringify(v)) }; };
-const err = status => Object.assign(new Error('e' + status), { status });
+// errors the game server confirms carry a code; gateway/proxy errors don't
+const err = (status, code = status >= 400 && status < 500 && status !== 408 && status !== 429 ? 'api' : null) => Object.assign(new Error('e' + status), { status, code });
 
 test('which errors are retried', () => {
   for (const s of [0, 408, 429, 500, 502, 503, 504]) assert.ok(isRetryable(err(s)), String(s));
   for (const s of [400, 401, 403, 404, 409, 422]) assert.ok(!isRetryable(err(s)), String(s));
+  // the same statuses without the server's code (a gateway or proxy said it) are retried
+  for (const s of [401, 404, 403]) assert.ok(isRetryable(err(s, null)), 'gateway ' + s);
   assert.ok(backoff(1) < backoff(3) && backoff(30) === 5 * 60 * 1000);
 });
 
@@ -67,4 +70,47 @@ test('two flushes at once send a game only once', async () => {
   box.add({ gameId: 'once' });
   await Promise.all([box.flush(), box.flush()]);
   assert.equal(calls, 1);
+});
+
+test('switching profiles keeps each profile\'s unsent games; switching back recovers them', async () => {
+  const s = memStore();
+  let who = 'A';
+  const sent = [];
+  const box = createOutbox({ storage: s, key: () => 'outbox.' + who, context: () => ({ token: who }), send: async (item, ctx) => { sent.push(ctx.token + ':' + item.gameId); return {}; } });
+  box.add({ gameId: 'a1' });
+  who = 'B';
+  assert.equal(box.pending().length, 0, 'B does not see A\'s games');
+  box.add({ gameId: 'b1' });
+  await box.flush({ force: true });
+  assert.deepEqual(sent, ['B:b1']);
+  who = 'A';
+  assert.equal(box.pending().length, 1, 'A\'s game is still there');
+  await box.flush({ force: true });
+  assert.deepEqual(sent, ['B:b1', 'A:a1']);
+});
+
+test('a profile switch during a flush cannot send games with the other token', async () => {
+  const s = memStore();
+  let who = 'A';
+  const sent = [];
+  const box = createOutbox({ storage: s, key: () => 'outbox.' + who, context: () => ({ token: who }),
+    send: async (item, ctx) => { who = 'B'; await new Promise(r => setTimeout(r, 5)); sent.push(ctx.token + ':' + item.gameId); return {}; } });
+  box.add({ gameId: 'a1' }); box.add({ gameId: 'a2' });
+  await box.flush({ force: true });
+  assert.deepEqual(sent, ['A:a1', 'A:a2']);
+  who = 'A';
+  assert.equal(box.list().filter(x => x.state === 'posted').length, 2, 'results written to A\'s outbox');
+  who = 'B';
+  assert.equal(box.list().length, 0);
+});
+
+test('a gateway 404 is retried, a confirmed 404 needs attention', async () => {
+  let mode = 'gateway';
+  const box = createOutbox({ storage: memStore(), send: async () => { throw mode === 'gateway' ? err(404, null) : err(404, 'missing'); } });
+  box.add({ gameId: 'g' });
+  await box.flush({ force: true });
+  assert.equal(box.get('g').state, 'pending');
+  mode = 'server';
+  await box.flush({ force: true });
+  assert.equal(box.get('g').state, 'failed');
 });

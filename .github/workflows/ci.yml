@@ -10,3 +10,5 @@ jobs:
         with: { node-version: 22 }
       - run: npm run check
       - run: for f in src/*.js sw.js; do node --check "$f"; done
+      - name: Pages point at the current release files
+        run: node scripts/release.mjs && git diff --exit-code -- index.html admin.html privacy.html sw.js assets/

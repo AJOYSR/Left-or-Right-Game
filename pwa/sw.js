@@ -1,13 +1,14 @@
-// Script addresses carry the release number (?v=11, set in index.html and the imports), so a
-// cache from an older release can never hand a new page an old script. Bump it on every release.
+// Scripts and styles live at content-hashed addresses (/assets/main.<hash>.js, made by
+// scripts/release.mjs), so a cache from an older release can never hand a new page an old script,
+// and old files stay on the server for old tabs. The release script also updates the list below.
 // Offline support: the app shell is cached on install, so the game opens and Classic games
 // play with no connection. Game-server calls always go to the network.
-const VERSION = 'v11';
+const VERSION = 'r-0773d75aed';
 const SHELL = `lor-shell-${VERSION}`;
 const FONTS = 'lor-fonts';
 const FILES = [
-  '/', '/styles.css?v=11', '/manifest.webmanifest',
-  '/src/main.js?v=11', '/src/core.js?v=11', '/src/api.js?v=11', '/src/queue.js?v=11', '/src/config.js?v=11', '/privacy', '/doc.css?v=11',
+  '/', '/assets/styles.dd203d50a7.css', '/manifest.webmanifest',
+  '/assets/main.7becfceace.js', '/assets/core.373fb97d34.js', '/assets/api.85c113d010.js', '/assets/queue.91786d6ba2.js', '/assets/config.6c2d557f76.js', '/privacy', '/assets/doc.2be06cfe06.css',
   '/fonts/fonts.css', '/fonts/inter-latin.woff2', '/fonts/inter-latin-ext.woff2', '/fonts/bricolage-grotesque-latin.woff2', '/fonts/bricolage-grotesque-latin-ext.woff2',
   '/icons/icon-192.png', '/icons/icon-512.png', '/icons/maskable-512.png', '/icons/apple-touch-icon.png', '/icons/icon-32.png', '/icons/icon.svg',
 ];
@@ -49,8 +50,8 @@ self.addEventListener('fetch', e => {
     }).catch(() => caches.match('/', { ignoreSearch: true })));
     return;
   }
-  // Fonts and icons never change: cache first.
-  if (url.pathname.startsWith('/fonts/') || url.pathname.startsWith('/icons/')) {
+  // Hashed release files, fonts and icons never change: cache first.
+  if (url.pathname.startsWith('/assets/') || url.pathname.startsWith('/fonts/') || url.pathname.startsWith('/icons/')) {
     e.respondWith(caches.match(req).then(hit => hit || fetch(req).then(res => {
       if (res.ok) { const copy = res.clone(); caches.open(SHELL).then(c => c.put(req, copy)); }
       return res;

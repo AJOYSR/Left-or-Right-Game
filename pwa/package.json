@@ -4,8 +4,9 @@
   "type": "module",
   "scripts": {
     "test": "node --test tests/",
-    "dev": "python3 scripts/dev-server.py",
-    "deploy": "npx vercel@latest --prod",
+    "dev": "node scripts/release.mjs && python3 scripts/dev-server.py",
+    "release": "node scripts/release.mjs",
+    "deploy": "node scripts/release.mjs && npx vercel@latest --prod",
     "icons": "python3 scripts/make-icons.py",
     "sync-server": "cp src/core.js ../supabase/functions/api/core.js",
     "check": "cmp src/core.js ../supabase/functions/api/core.js && echo 'rules copies match' && node --test tests/"

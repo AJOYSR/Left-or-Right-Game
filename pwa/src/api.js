@@ -1,4 +1,4 @@
-import { API_URL, PUBLISHABLE_KEY } from './config.js?v=11';
+import { API_URL, PUBLISHABLE_KEY } from './config.js';
 
 const TOKEN_KEY = 'lor.playerToken';
 
@@ -16,10 +16,9 @@ export class ApiError extends Error {
 }
 
 // One call to the game server. Throws ApiError; status 0 means the network is down.
-export async function api(action, body = {}, { timeout = 12000 } = {}) {
+export async function api(action, body = {}, { timeout = 12000, token = getToken() } = {}) {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), timeout);
-  const token = getToken();
   let res;
   try {
     res = await fetch(API_URL, {
@@ -35,18 +34,29 @@ export async function api(action, body = {}, { timeout = 12000 } = {}) {
   }
   let data = {};
   try { data = await res.json(); } catch {}
-  if (!res.ok) throw new ApiError(res.status, data.error || 'Something went wrong. Try again.');
+  // `code` is only present on errors from the game server itself (not a proxy or gateway)
+  if (!res.ok) throw Object.assign(new ApiError(res.status, data.error || 'Something went wrong. Try again.'), { code: data.code || null });
   return data;
 }
 
 // Finished games wait in a durable outbox until the server has them (see queue.js).
-import { createOutbox } from './queue.js?v=11';
+import { createOutbox } from './queue.js';
+// One outbox per player profile (by player id), so restoring another player's code never
+// deletes this one's unsent games; restoring this code again picks them back up.
+export const outboxKey = () => { const me = store.get('me', null); return me && me.id ? 'outbox.' + me.id : 'outbox'; };
 export const outbox = createOutbox({
   storage: store,
-  send: item => api('finish', { gameId: item.gameId, events: item.events, ended: item.ended }, { timeout: 15000 }),
+  key: outboxKey,
+  context: () => ({ token: getToken() }),
+  send: (item, ctx) => api('finish', { gameId: item.gameId, events: item.events, ended: item.ended }, { timeout: 15000, token: ctx.token }),
 });
-// Games queued by older versions of the app.
+// Games queued by older versions of the app (one shared outbox, or the older `pending` list)
+// belong to the player signed in now.
 try {
+  if (outboxKey() !== 'outbox') {
+    const shared = store.get('outbox', null);
+    if (Array.isArray(shared) && shared.length) { const mine = outbox.list(); store.set(outboxKey(), [...mine, ...shared.filter(x => !mine.some(m => m.gameId === x.gameId))]); store.set('outbox', null); }
+  }
   const old = store.get('pending', null);
   if (Array.isArray(old) && old.length) { for (const p of old) if (!outbox.get(p.gameId)) outbox.add(p); store.set('pending', null); }
 } catch {}
