@@ -82,7 +82,7 @@ supabase/
   migrations/           database schema
 docs/screenshots/       images used in this README
 index.html              the original single-file prototype (a claude.ai artifact)
-LAUNCH.md               launch notes and post drafts
+MARKETING.md            where and how to market it, with post drafts
 ```
 
 More technical detail (security, link previews, rules versions, saving scores) is in [pwa/README.md](pwa/README.md).
